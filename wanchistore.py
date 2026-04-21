@@ -120,7 +120,7 @@ with tab2:
                     
                     # Logo
                     try:
-                        pdf.image("logo.png", x=10, y=10, w=45) 
+                        pdf.image("logo.jpg", x=10, y=10, w=45) 
                     except:
                         try:
                             pdf.image("logo.jpg", x=10, y=10, w=45)
