@@ -68,16 +68,16 @@ with tab2:
             st.write(f"### Tổng cộng: {total_price:,} đ")
             
             if st.session_state.cust_name and st.session_state.cust_phone:
-                if st.button("📄 Chốt đơn & Tải file PDF", type="primary"):
-    pdf = FPDF()
-    pdf.add_page()
+    if st.button("📄 Chốt đơn & Tải file PDF", type="primary"):
+        pdf = FPDF()
+        pdf.add_page()
     
-    # 1. Thêm dòng này để nạp file font tiếng Việt từ GitHub
-    pdf.add_font("Arial", style="", fname="arial.ttf") 
+        # 1. Thêm dòng này để nạp file font tiếng Việt từ GitHub
+        pdf.add_font("Arial", style="", fname="arial.ttf") 
     
-    # 2. Cài đặt font chữ mặc định cho toàn bộ PDF
-    pdf.set_font("Arial", size=12) 
+        # 2. Cài đặt font chữ mặc định cho toàn bộ PDF
+        pdf.set_font("Arial", size=12) 
     
-    # --- Các đoạn code bên dưới giữ nguyên ---
-    pdf.cell(200, 10, txt=f"Khach hang: {st.session_state.cust_name} - SDT: {st.session_state.cust_phone}", ln=True)
-    # ...
+        # --- Các đoạn code bên dưới giữ nguyên ---
+        pdf.cell(200, 10, txt=f"Khach hang: {st.session_state.cust_name} - SDT: {st.session_state.cust_phone}", ln=True)
+        # ...
