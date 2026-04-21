@@ -109,7 +109,7 @@ with tab2:
                     # --- PHẦN 1: HEADER (LOGO & ĐỊA CHỈ) ---
                     # Chèn Logo (Nếu có file logo.png trên GitHub)
                     try:
-                        pdf.image("logo.jpeg", x=10, y=10, w=45)
+                        pdf.image("logo.jpg", x=10, y=10, w=45)
                     except:
                         # Nếu không tìm thấy ảnh, in tạm chữ WANCHI
                         pdf.set_font("Arial", size=18)
