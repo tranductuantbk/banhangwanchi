@@ -69,13 +69,15 @@ with tab2:
             
             if st.session_state.cust_name and st.session_state.cust_phone:
                 if st.button("📄 Chốt đơn & Tải file PDF", type="primary"):
-                    pdf = FPDF()
-                    pdf.add_page()
-                    pdf.set_font("Arial", size=12) # Cần có file arial.ttf trong thư mục để gõ tiếng Việt
-                    pdf.cell(200, 10, txt=f"Khach hang: {st.session_state.cust_name} - SDT: {st.session_state.cust_phone}", ln=True)
-                    for item in cart_list:
-                        pdf.cell(200, 10, txt=f"{item['Mã']} | {item['Tên']} | SL: {item['SL']} | {item['Tiền']:,} d", ln=True)
-                    pdf.cell(200, 10, txt=f"TONG TIEN: {total_price:,} d", ln=True)
-                    
-                    pdf_bytes = pdf.output(dest='S').encode('latin1')
-                    st.download_button("⬇️ Nhấn để tải PDF", data=pdf_bytes, file_name="DonHang.pdf", mime="application/pdf")
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # 1. Thêm dòng này để nạp file font tiếng Việt từ GitHub
+    pdf.add_font("Arial", style="", fname="arial.ttf") 
+    
+    # 2. Cài đặt font chữ mặc định cho toàn bộ PDF
+    pdf.set_font("Arial", size=12) 
+    
+    # --- Các đoạn code bên dưới giữ nguyên ---
+    pdf.cell(200, 10, txt=f"Khach hang: {st.session_state.cust_name} - SDT: {st.session_state.cust_phone}", ln=True)
+    # ...
