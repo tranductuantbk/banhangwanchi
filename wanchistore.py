@@ -18,7 +18,7 @@ if 'cust_phone' not in st.session_state:
     st.session_state.cust_phone = ""
 
 # --- KẾT NỐI NEON DATABASE ---
-conn = st.connection("postgresql", type="sql")
+conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 # --- GIAO DIỆN CHÍNH ---
 st.title("🏭 Cổng Đặt Hàng Wanchi")
