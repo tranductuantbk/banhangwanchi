@@ -122,7 +122,7 @@ with tab2:
                     pdf.cell(200, 10, txt=f"TỔNG CỘNG: {total_price:,} VNĐ", ln=True)
                     
                     # Xuất PDF ra trình duyệt
-                    pdf_bytes = pdf.output(dest='S').encode('latin1')
+                    pdf_bytes = bytes(pdf.output())
                     
                     st.success("Tạo đơn hàng thành công! Nhấn nút bên dưới để tải file.")
                     st.download_button(
