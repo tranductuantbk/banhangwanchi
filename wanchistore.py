@@ -28,7 +28,7 @@ tab1, tab2 = st.tabs(["📦 Danh sách sản phẩm", "🛒 Giỏ hàng & Chốt
 with tab1:
     try:
         # Lấy dữ liệu từ bảng products trên Neon
-        df_products = conn.query("SELECT * FROM products ORDER BY id")
+        df_products = conn.query("SELECT * FROM products ORDER BY id", ttl=0)
         
         if df_products.empty:
             st.info("Hiện tại chưa có sản phẩm nào trong kho. Vui lòng vào trang Admin để thêm.")
