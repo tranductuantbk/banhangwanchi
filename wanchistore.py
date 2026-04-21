@@ -126,7 +126,7 @@ with tab2:
                     
                     # --- PHẦN 2: TIÊU ĐỀ & NGÀY THÁNG ---
                     pdf.set_font("Arial", size=18)
-                    pdf.cell(0, 10, txt="HÓA ĐƠN BÁN HÀNG", ln=True, align="C")
+                    pdf.cell(0, 10, txt="PHIẾU ĐẶT HÀNG", ln=True, align="C")
                     
                     pdf.set_font("Arial", size=11)
                     ngay_hien_tai = datetime.now().strftime("%d/%m/%Y")
