@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from fpdf import FPDF
 from sqlalchemy import text
+from datetime import datetime
 
 st.set_page_config(page_title="Bán Hàng Wanchi", layout="wide")
 
@@ -97,31 +98,83 @@ with tab2:
             if st.session_state.cust_name and st.session_state.cust_phone:
                 if st.button("📄 Chốt đơn & Tải file PDF", type="primary"):
                     
-                    # Khởi tạo PDF
                     pdf = FPDF()
                     pdf.add_page()
                     
-                    # Nạp Font Arial (bắt buộc có file arial.ttf trên GitHub)
                     try:
                         pdf.add_font("Arial", style="", fname="arial.ttf")
-                        pdf.set_font("Arial", size=12)
                     except Exception as e:
                         st.error("Lỗi: Không tìm thấy file font 'arial.ttf' trên máy chủ.")
                     
-                    # Ghi thông tin
-                    pdf.cell(200, 10, txt="PHIEU DAT HANG - WANCHI PLASTIC", ln=True, align="C")
-                    pdf.cell(200, 10, txt=f"Khách hàng: {st.session_state.cust_name} - SĐT: {st.session_state.cust_phone}", ln=True)
+                    # --- PHẦN 1: HEADER (LOGO & ĐỊA CHỈ) ---
+                    # Chèn Logo (Nếu có file logo.png trên GitHub)
+                    try:
+                        pdf.image("logo.png", x=10, y=10, w=45)
+                    except:
+                        # Nếu không tìm thấy ảnh, in tạm chữ WANCHI
+                        pdf.set_font("Arial", size=18)
+                        pdf.cell(45, 10, txt="WANCHI", ln=False, align="L")
+                        
+                    # In Địa chỉ & SĐT bên phải logo
+                    pdf.set_font("Arial", size=10)
+                    pdf.set_xy(65, 12)
+                    pdf.cell(0, 5, txt="775 Võ Hữu Lợi, Xã Lê Minh Xuân, Huyện Bình Chánh, TP.HCM", ln=True)
+                    pdf.set_xy(65, 18)
+                    pdf.cell(0, 5, txt="SĐT: 0902.580.828 - 0937.572.577", ln=True)
+                    
+                    pdf.ln(15) # Xuống dòng
+                    
+                    # --- PHẦN 2: TIÊU ĐỀ & NGÀY THÁNG ---
+                    pdf.set_font("Arial", size=18)
+                    pdf.cell(0, 10, txt="HÓA ĐƠN BÁN HÀNG", ln=True, align="C")
+                    
+                    pdf.set_font("Arial", size=11)
+                    ngay_hien_tai = datetime.now().strftime("%d/%m/%Y")
+                    pdf.cell(0, 6, txt=f"Ngày: {ngay_hien_tai}", ln=True, align="C")
+                    
+                    pdf.ln(8)
+                    
+                    # --- PHẦN 3: THÔNG TIN KHÁCH HÀNG ---
+                    pdf.set_font("Arial", size=11)
+                    pdf.cell(0, 6, txt=f"Khách hàng: {st.session_state.cust_name.upper()}", ln=True)
+                    pdf.cell(0, 6, txt=f"Điện thoại: {st.session_state.cust_phone}", ln=True)
+                    
                     pdf.ln(5)
                     
-                    # In danh sách sản phẩm
-                    for item in cart_list:
-                        pdf.cell(200, 10, txt=f"Mã: {item['Mã']} | {item['Tên']} | SL: {item['SL']} | Thành tiền: {item['Tiền']:,} đ", ln=True)
+                    # --- PHẦN 4: BẢNG SẢN PHẨM ---
+                    # Cài đặt màu nền xám nhạt cho dòng tiêu đề bảng
+                    pdf.set_fill_color(230, 230, 230)
+                    pdf.set_font("Arial", size=10)
                     
-                    pdf.ln(5)
-                    pdf.set_font("Arial", style="", size=14)
-                    pdf.cell(200, 10, txt=f"TỔNG CỘNG: {total_price:,} VNĐ", ln=True)
+                    # Vẽ dòng tiêu đề (Header)
+                    pdf.cell(15, 8, txt="STT", border=1, align="C", fill=True)
+                    pdf.cell(85, 8, txt="Tên Sản Phẩm", border=1, align="C", fill=True)
+                    pdf.cell(15, 8, txt="SL", border=1, align="C", fill=True)
+                    pdf.cell(35, 8, txt="Đơn Giá", border=1, align="C", fill=True)
+                    pdf.cell(40, 8, txt="Thành Tiền", border=1, align="C", fill=True)
+                    pdf.ln()
                     
-                    # Xuất PDF ra trình duyệt
+                    # Vẽ các dòng dữ liệu sản phẩm
+                    for i, item in enumerate(cart_list, 1):
+                        pdf.cell(15, 8, txt=str(i), border=1, align="C")
+                        pdf.cell(85, 8, txt=item['Tên'], border=1)
+                        pdf.cell(15, 8, txt=str(item['SL']), border=1, align="C")
+                        
+                        # Định dạng tiền tệ có dấu chấm (VD: 12.187.000)
+                        don_gia = int(item['Tiền'] / item['SL'])
+                        chuoi_don_gia = f"{don_gia:,}".replace(",", ".")
+                        chuoi_thanh_tien = f"{item['Tiền']:,}".replace(",", ".")
+                        
+                        pdf.cell(35, 8, txt=chuoi_don_gia, border=1, align="R")
+                        pdf.cell(40, 8, txt=chuoi_thanh_tien, border=1, align="R")
+                        pdf.ln()
+                        
+                    # Dòng TỔNG CỘNG cuối bảng
+                    pdf.cell(150, 8, txt="TỔNG CỘNG:", border=1, align="R")
+                    chuoi_tong_cong = f"{total_price:,}".replace(",", ".")
+                    pdf.cell(40, 8, txt=chuoi_tong_cong, border=1, align="R")
+                    
+                    # --- XUẤT FILE ---
                     pdf_bytes = bytes(pdf.output())
                     
                     st.success("Tạo đơn hàng thành công! Nhấn nút bên dưới để tải file.")
