@@ -1,5 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
+import io
 from fpdf import FPDF
 from sqlalchemy import text
 from datetime import datetime
@@ -94,17 +97,146 @@ with tab2:
             
             st.write(f"### Tổng cộng: {total_price:,} đ")
             
-            # --- XỬ LÝ NÚT BẤM VÀ XUẤT PDF ---
+           # --- KHU VỰC CHỌN CÁCH LƯU ĐƠN HÀNG ---
             if st.session_state.cust_name and st.session_state.cust_phone:
-                if st.button("📄 Chốt đơn & Tải file PDF", type="primary"):
+                st.divider()
+                st.subheader("🎉 Chọn định dạng để lưu đơn hàng:")
+                
+                col_pdf, col_img = st.columns(2)
+                
+                # ==========================================
+                # LỰA CHỌN 1: TẠO VÀ TẢI FILE PDF
+                # ==========================================
+                pdf = FPDF()
+                pdf.add_page()
+                try:
+                    pdf.add_font("Arial", style="", fname="arial.ttf")
+                except: pass
+                
+                try:
+                    # Đổi "logo.png" thành tên file logo thực tế của bạn trên Github (vd: logo.jpg)
+                    pdf.image("logo.png", x=10, y=10, w=45) 
+                except:
+                    pdf.set_font("Arial", size=18)
+                    pdf.cell(45, 10, txt="WANCHI", ln=False, align="L")
                     
-                    pdf = FPDF()
-                    pdf.add_page()
+                pdf.set_font("Arial", size=10)
+                pdf.set_xy(65, 12)
+                pdf.cell(0, 5, txt="775 Võ Hữu Lợi, Xã Lê Minh Xuân, Huyện Bình Chánh, TP.HCM", ln=True)
+                pdf.set_xy(65, 18)
+                pdf.cell(0, 5, txt="SĐT: 0902.580.828 - 0937.572.577", ln=True)
+                pdf.ln(15)
+                
+                pdf.set_font("Arial", size=18)
+                pdf.cell(0, 10, txt="PHIẾU ĐẶT HÀNG", ln=True, align="C")
+                pdf.set_font("Arial", size=11)
+                pdf.cell(0, 6, txt=f"Ngày: {datetime.now().strftime('%d/%m/%Y')}", ln=True, align="C")
+                pdf.ln(8)
+                
+                pdf.set_font("Arial", size=11)
+                pdf.cell(0, 6, txt=f"Khách hàng: {st.session_state.cust_name.upper()}", ln=True)
+                pdf.cell(0, 6, txt=f"Điện thoại: {st.session_state.cust_phone}", ln=True)
+                pdf.ln(5)
+                
+                pdf.set_fill_color(230, 230, 230)
+                pdf.set_font("Arial", size=10)
+                pdf.cell(15, 8, txt="STT", border=1, align="C", fill=True)
+                pdf.cell(85, 8, txt="Tên Sản Phẩm", border=1, align="C", fill=True)
+                pdf.cell(15, 8, txt="SL", border=1, align="C", fill=True)
+                pdf.cell(35, 8, txt="Đơn Giá", border=1, align="C", fill=True)
+                pdf.cell(40, 8, txt="Thành Tiền", border=1, align="C", fill=True)
+                pdf.ln()
+                
+                for i, item in enumerate(cart_list, 1):
+                    pdf.cell(15, 8, txt=str(i), border=1, align="C")
+                    pdf.cell(85, 8, txt=item['Tên'], border=1)
+                    pdf.cell(15, 8, txt=str(item['SL']), border=1, align="C")
+                    don_gia = int(item['Tiền'] / item['SL'])
+                    pdf.cell(35, 8, txt=f"{don_gia:,}".replace(",", "."), border=1, align="R")
+                    pdf.cell(40, 8, txt=f"{item['Tiền']:,}".replace(",", "."), border=1, align="R")
+                    pdf.ln()
                     
-                    try:
-                        pdf.add_font("Arial", style="", fname="arial.ttf")
-                    except Exception as e:
-                        st.error("Lỗi: Không tìm thấy file font 'arial.ttf' trên máy chủ.")
+                pdf.cell(150, 8, txt="TỔNG CỘNG:", border=1, align="R")
+                pdf.cell(40, 8, txt=f"{total_price:,}".replace(",", "."), border=1, align="R")
+                
+                pdf_bytes = bytes(pdf.output())
+                
+                with col_pdf:
+                    st.download_button(
+                        label="📄 Lưu file PDF", 
+                        data=pdf_bytes, 
+                        file_name=f"Phieu_Wanchi_{st.session_state.cust_name}.pdf", 
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+
+                # ==========================================
+                # LỰA CHỌN 2: TẠO VÀ TẢI FILE HÌNH ẢNH (JPG)
+                # ==========================================
+                # Tính toán chiều cao ảnh dựa trên số lượng sản phẩm
+                img_height = max(550, 350 + len(cart_list)*40 + 50)
+                img = Image.new('RGB', (800, img_height), color=(255, 255, 255))
+                draw = ImageDraw.Draw(img)
+                
+                try:
+                    font_title = ImageFont.truetype("arial.ttf", 32)
+                    font_text = ImageFont.truetype("arial.ttf", 16)
+                    font_bold = ImageFont.truetype("arial.ttf", 16)
+                except:
+                    font_title = font_text = font_bold = ImageFont.load_default()
+
+                try:
+                    # Đổi "logo.png" thành tên file logo thực tế của bạn
+                    logo = Image.open("logo.png").convert("RGBA")
+                    logo = logo.resize((140, 50))
+                    img.paste(logo, (40, 30), logo)
+                except:
+                    draw.text((40, 30), "WANCHI", fill=(0, 0, 0), font=font_title)
+                
+                draw.text((220, 35), "775 Võ Hữu Lợi, Xã Lê Minh Xuân, Bình Chánh, TP.HCM", fill=(0,0,0), font=font_text)
+                draw.text((220, 60), "SĐT: 0902.580.828 - 0937.572.577", fill=(0,0,0), font=font_text)
+
+                draw.text((280, 130), "PHIẾU ĐẶT HÀNG", fill=(0, 0, 0), font=font_title)
+                draw.text((340, 180), f"Ngày: {datetime.now().strftime('%d/%m/%Y')}", fill=(0,0,0), font=font_text)
+
+                draw.text((40, 230), f"Khách hàng: {st.session_state.cust_name.upper()}", fill=(0,0,0), font=font_bold)
+                draw.text((40, 260), f"Điện thoại: {st.session_state.cust_phone}", fill=(0,0,0), font=font_bold)
+
+                y_pos = 300
+                draw.rectangle([40, y_pos, 760, y_pos+35], fill=(230, 230, 230), outline=(0,0,0))
+                draw.text((50, y_pos+8), "STT", fill=(0,0,0), font=font_bold)
+                draw.text((100, y_pos+8), "Tên Sản Phẩm", fill=(0,0,0), font=font_bold)
+                draw.text((450, y_pos+8), "SL", fill=(0,0,0), font=font_bold)
+                draw.text((520, y_pos+8), "Đơn Giá", fill=(0,0,0), font=font_bold)
+                draw.text((640, y_pos+8), "Thành Tiền", fill=(0,0,0), font=font_bold)
+                
+                y_pos += 35
+                for i, item in enumerate(cart_list, 1):
+                    draw.rectangle([40, y_pos, 760, y_pos+35], outline=(0,0,0))
+                    draw.text((55, y_pos+8), str(i), fill=(0,0,0), font=font_text)
+                    draw.text((100, y_pos+8), item['Tên'][:40], fill=(0,0,0), font=font_text)
+                    draw.text((450, y_pos+8), str(item['SL']), fill=(0,0,0), font=font_text)
+                    don_gia = int(item['Tiền'] / item['SL'])
+                    draw.text((520, y_pos+8), f"{don_gia:,}".replace(",", "."), fill=(0,0,0), font=font_text)
+                    draw.text((640, y_pos+8), f"{item['Tiền']:,}".replace(",", "."), fill=(0,0,0), font=font_text)
+                    y_pos += 35
+                
+                draw.rectangle([40, y_pos, 760, y_pos+40], outline=(0,0,0))
+                draw.text((450, y_pos+10), "TỔNG CỘNG:", fill=(0,0,0), font=font_bold)
+                draw.text((640, y_pos+10), f"{total_price:,}".replace(",", "."), fill=(0,0,0), font=font_bold)
+
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=95)
+                img_bytes = buf.getvalue()
+                
+                with col_img:
+                    st.download_button(
+                        label="🖼️ Lưu Ảnh đơn hàng (.jpg)", 
+                        data=img_bytes, 
+                        file_name=f"Phieu_Wanchi_{st.session_state.cust_name}.jpg", 
+                        mime="image/jpeg",
+                        use_container_width=True
+                    )
                     
                     # --- PHẦN 1: HEADER (LOGO & ĐỊA CHỈ) ---
                     # Chèn Logo (Nếu có file logo.png trên GitHub)
