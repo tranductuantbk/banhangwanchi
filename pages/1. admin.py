@@ -28,7 +28,8 @@ else:
         st.rerun()
     st.divider()
     
-    tab_add, tab_edit, tab_orders = st.tabs(["➕ Thêm SP", "🛠 Sửa / Xóa SP", "📜 Lưu trữ đơn hàng"])
+    # CHỈ GIỮ LẠI 2 TABS CHÍNH
+    tab_add, tab_edit = st.tabs(["➕ Thêm SP", "🛠 Sửa / Xóa SP"])
     
     with tab_add:
         with st.form("add_form", clear_on_submit=True):
@@ -81,45 +82,3 @@ else:
                                 s.commit()
                             st.success("Đã xóa!")
                             st.rerun()
-
-    with tab_orders:
-        st.subheader("📋 Danh sách Đơn hàng Khách đã chốt")
-        try:
-            df_orders = conn.query("SELECT * FROM orders ORDER BY order_date DESC", ttl=0)
-            if df_orders.empty:
-                st.info("Chưa có đơn hàng nào được lưu.")
-            else:
-                for i, row in df_orders.iterrows():
-                    with st.container(border=True):
-                        c1, c2, c3 = st.columns([2, 2, 1])
-                        c1.write(f"👤 **{row['customer_name']}**")
-                        c1.write(f"📞 {row['customer_phone']}")
-                        
-                        date_str = row['order_date'].strftime("%d/%m/%Y - %H:%M")
-                        c2.write(f"📅 {date_str}")
-                        c2.write(f"💰 **{int(row['total_amount']):,} đ**")
-                        
-                        with c3:
-                            if pd.notna(row['file_data']) and row['file_data']:
-                                file_bytes = base64.b64decode(row['file_data'])
-                                ext = row['file_type'] if pd.notna(row['file_type']) else "pdf"
-                                mime = "image/jpeg" if ext == "jpg" else "application/pdf"
-                                
-                                st.download_button(
-                                    label=f"📥 Tải File (.{ext})",
-                                    data=file_bytes,
-                                    file_name=f"Don_{row['customer_name']}.{ext}",
-                                    mime=mime,
-                                    key=f"dl_{row['id']}"
-                                )
-                            
-                            if st.button("🗑️ Xóa đơn", key=f"del_{row['id']}"):
-                                with conn.session as s:
-                                    s.execute(text("DELETE FROM orders WHERE id=:id"), {"id": row['id']})
-                                    s.commit()
-                                st.rerun()
-                                
-                        with st.expander("Xem sản phẩm trong đơn"):
-                            st.text(row['order_items'])
-        except Exception as e:
-            st.error("Lỗi đọc CSDL.")
