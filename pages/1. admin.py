@@ -4,7 +4,6 @@ import pandas as pd
 from sqlalchemy import text
 
 st.set_page_config(page_title="Wanchi Admin", layout="wide")
-# CHỐNG NGỦ ĐÔNG CHO ADMIN
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 if 'is_admin' not in st.session_state:
@@ -29,10 +28,8 @@ else:
         st.rerun()
     st.divider()
     
-    # 3 TABS QUẢN LÝ
     tab_add, tab_edit, tab_orders = st.tabs(["➕ Thêm SP", "🛠 Sửa / Xóa SP", "📜 Lưu trữ đơn hàng"])
     
-    # --- TAB 1 & 2: (Giữ nguyên logic cũ) ---
     with tab_add:
         with st.form("add_form", clear_on_submit=True):
             code = st.text_input("Mã SP")
@@ -40,12 +37,12 @@ else:
             size = st.text_input("Kích thước")
             price = st.number_input("Giá", min_value=0)
             desc = st.text_area("Miêu tả chi tiết")
-            img_file = st.file_uploader("Tải ảnh", type=['png', 'jpg', 'jpeg'])
+            img_link = st.text_input("🔗 Link ảnh trực tuyến (Copy địa chỉ hình ảnh trên mạng dán vào đây)")
+            
             if st.form_submit_button("Lưu sản phẩm"):
-                img_b64 = base64.b64encode(img_file.getvalue()).decode() if img_file else ""
                 with conn.session as s:
                     s.execute(text("INSERT INTO products (product_code, name, size, description, price, image_data) VALUES (:c, :n, :s, :d, :p, :i)"),
-                              {"c": code, "n": name, "s": size, "d": desc, "p": price, "i": img_b64})
+                              {"c": code, "n": name, "s": size, "d": desc, "p": price, "i": img_link})
                     s.commit()
                 st.success("Đã thêm thành công!")
 
@@ -65,17 +62,13 @@ else:
                     e_size = st.text_input("Kích thước", value=prod['size'] if pd.notna(prod['size']) else "")
                     e_price = st.number_input("Giá", min_value=0, value=int(prod['price'] if pd.notna(prod['price']) else 0))
                     e_desc = st.text_area("Miêu tả", value=prod['description'] if pd.notna(prod['description']) else "")
-                    e_img = st.file_uploader("Tải ảnh mới", type=['png', 'jpg', 'jpeg'])
+                    e_img_link = st.text_input("🔗 Link ảnh", value=prod['image_data'] if pd.notna(prod['image_data']) else "")
+                    
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.form_submit_button("💾 Lưu thay đổi", type="primary"):
-                            if e_img:
-                                e_img_b64 = base64.b64encode(e_img.getvalue()).decode()
-                                query = text("UPDATE products SET product_code=:c, name=:n, size=:s, price=:p, description=:d, image_data=:i WHERE id=:id")
-                                params = {"c": e_code, "n": e_name, "s": e_size, "p": e_price, "d": e_desc, "i": e_img_b64, "id": selected_id}
-                            else:
-                                query = text("UPDATE products SET product_code=:c, name=:n, size=:s, price=:p, description=:d WHERE id=:id")
-                                params = {"c": e_code, "n": e_name, "s": e_size, "p": e_price, "d": e_desc, "id": selected_id}
+                            query = text("UPDATE products SET product_code=:c, name=:n, size=:s, price=:p, description=:d, image_data=:i WHERE id=:id")
+                            params = {"c": e_code, "n": e_name, "s": e_size, "p": e_price, "d": e_desc, "i": e_img_link, "id": selected_id}
                             with conn.session as s:
                                 s.execute(query, params)
                                 s.commit()
@@ -89,9 +82,6 @@ else:
                             st.success("Đã xóa!")
                             st.rerun()
 
-    # ==========================================
-    # KHU VỰC 3: LƯU TRỮ ĐƠN HÀNG (MỚI)
-    # ==========================================
     with tab_orders:
         st.subheader("📋 Danh sách Đơn hàng Khách đã chốt")
         try:
@@ -110,7 +100,6 @@ else:
                         c2.write(f"💰 **{int(row['total_amount']):,} đ**")
                         
                         with c3:
-                            # Nút Tải file của khách
                             if pd.notna(row['file_data']) and row['file_data']:
                                 file_bytes = base64.b64decode(row['file_data'])
                                 ext = row['file_type'] if pd.notna(row['file_type']) else "pdf"
@@ -124,7 +113,6 @@ else:
                                     key=f"dl_{row['id']}"
                                 )
                             
-                            # Nút Xóa đơn
                             if st.button("🗑️ Xóa đơn", key=f"del_{row['id']}"):
                                 with conn.session as s:
                                     s.execute(text("DELETE FROM orders WHERE id=:id"), {"id": row['id']})
@@ -134,4 +122,4 @@ else:
                         with st.expander("Xem sản phẩm trong đơn"):
                             st.text(row['order_items'])
         except Exception as e:
-            st.error("Chưa tạo bảng orders trong CSDL Neon. Vui lòng chạy lệnh SQL tạo bảng.")
+            st.error("Lỗi đọc CSDL.")
