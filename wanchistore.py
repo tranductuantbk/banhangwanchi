@@ -34,7 +34,7 @@ def save_order_to_db(name, phone, total, items_list, file_type, file_bytes):
             s.commit()
     except: pass
 
-st.title("🏭 Cổng Đặt Hàng Wanchi")
+st.title("🏭 Cổng Đặt Hàng WANCHI")
 tab1, tab2 = st.tabs(["📦 Danh sách sản phẩm", "🛒 Giỏ hàng & Chốt đơn"])
 
 with tab1:
