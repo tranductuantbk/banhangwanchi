@@ -9,19 +9,18 @@ st.set_page_config(page_title="Wanchi Admin", layout="wide")
 # Kết nối CSDL Neon (Chống ngủ đông)
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
-# --- HÀM TỰ ĐỘNG CHUYỂN ĐỔI LINK DRIVE (ẨN) ---
+# --- HÀM TỰ ĐỘNG CHUYỂN ĐỔI LINK DRIVE (ĐÃ NÂNG CẤP CHỐNG CHẶN) ---
 def convert_drive_link(raw_url):
     if not raw_url:
         return ""
-    # Nếu là link thư mục, báo lỗi
     if "/folders/" in raw_url:
         st.error("⚠️ Bạn đang dán link THƯ MỤC. Hãy mở to ảnh rồi lấy link lại nhé!")
         return raw_url
-    # Tìm mã ID của file trong link Drive
     match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_url)
     if match:
-        return f"https://drive.google.com/uc?id={match.group(0)}"
-    return raw_url # Nếu không phải link drive hoặc link đã chuẩn thì giữ nguyên
+        # SỬ DỤNG LINK THUMBNAIL CHUYÊN DỤNG CỦA GOOGLE DRIVE
+        return f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
+    return raw_url
 
 if 'is_admin' not in st.session_state:
     st.session_state.is_admin = False
@@ -63,11 +62,9 @@ else:
             
             desc = st.text_area("Mô tả chi tiết")
             
-            # Ô DÁN LINK - TỰ ĐỘNG CHUYỂN ĐỔI NGẦM
             raw_img_url = st.text_input("🔗 Dán link chia sẻ từ Google Drive vào đây (Hệ thống tự xử lý)")
             
             if st.form_submit_button("💾 LƯU SẢN PHẨM"):
-                # Xử lý link ngầm trước khi lưu
                 final_link = convert_drive_link(raw_img_url)
                 
                 with conn.session as s:
@@ -87,7 +84,6 @@ else:
         if df_admin.empty:
             st.info("Kho hàng đang trống.")
         else:
-            # Chọn sản phẩm để sửa
             list_sp = {row['id']: f"[{row['product_code']}] {row['name']}" for _, row in df_admin.iterrows()}
             sel_id = st.selectbox("Chọn sản phẩm cần chỉnh sửa", options=list(list_sp.keys()), format_func=lambda x: list_sp[x])
             
@@ -101,13 +97,13 @@ else:
                     e_name = ec2.text_input("Tên sản phẩm", value=sp['name'])
                     
                     ec3, ec4 = st.columns(2)
-                    e_size = ec3.text_input("Kích thước", value=sp['size'])
-                    e_price = ec4.number_input("Giá bán", value=int(sp['price']), step=500)
+                    e_size = ec3.text_input("Kích thước", value=sp['size'] if pd.notna(sp['size']) else "")
+                    e_price = ec4.number_input("Giá bán", value=int(sp['price'] if pd.notna(sp['price']) else 0), step=500)
                     
-                    e_desc = st.text_area("Mô tả", value=sp['description'])
+                    e_desc = st.text_area("Mô tả", value=sp['description'] if pd.notna(sp['description']) else "")
                     
-                    # Ô DÁN LINK SỬA - CŨNG TỰ ĐỘNG CHUYỂN ĐỔI
-                    e_raw_link = st.text_input("Link ảnh mới (Để trống nếu giữ ảnh cũ)", value=sp['image_data'])
+                    # Ô DÁN LINK SỬA
+                    e_raw_link = st.text_input("Link ảnh mới (Để trống nếu giữ ảnh cũ)", value=sp['image_data'] if pd.notna(sp['image_data']) else "")
                     
                     col_save, col_del = st.columns(2)
                     
