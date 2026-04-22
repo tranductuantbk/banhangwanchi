@@ -10,7 +10,6 @@ import base64
 
 st.set_page_config(page_title="Bán Hàng Wanchi", layout="wide")
 
-# Khởi tạo Giỏ hàng
 if 'cart' not in st.session_state:
     st.session_state.cart = {}
 if 'cust_name' not in st.session_state:
@@ -18,12 +17,10 @@ if 'cust_name' not in st.session_state:
 if 'cust_phone' not in st.session_state:
     st.session_state.cust_phone = ""
 if 'saved_order' not in st.session_state:
-    st.session_state.saved_order = False # Tránh lưu trùng 2 lần
+    st.session_state.saved_order = False
 
-# --- KẾT NỐI NEON CHỐNG NGỦ ĐÔNG ---
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
-# Hàm lưu đơn hàng ngầm vào CSDL
 def save_order_to_db(name, phone, total, items_list, file_type, file_bytes):
     try:
         b64_data = base64.b64encode(file_bytes).decode('utf-8')
@@ -35,10 +32,8 @@ def save_order_to_db(name, phone, total, items_list, file_type, file_bytes):
                 VALUES (:n, :p, :t, :it, :ft, :fd)
             """), {"n": name, "p": phone, "t": total, "it": items_str, "ft": file_type, "fd": b64_data})
             s.commit()
-    except Exception as e:
-        pass # Bỏ qua lỗi lưu db để không ảnh hưởng khách tải file
+    except: pass
 
-# --- GIAO DIỆN CHÍNH ---
 st.title("🏭 Cổng Đặt Hàng Wanchi")
 tab1, tab2 = st.tabs(["📦 Danh sách sản phẩm", "🛒 Giỏ hàng & Chốt đơn"])
 
@@ -52,8 +47,12 @@ with tab1:
             for i, row in df_products.iterrows():
                 with cols[i % 3]:
                     with st.container(border=True):
+                        # ĐỌC ẢNH TỪ ĐƯỜNG LINK THAY VÌ BASE64
                         if pd.notna(row['image_data']) and str(row['image_data']).strip() != "":
-                            st.image(f"data:image/png;base64,{row['image_data']}", use_container_width=True)
+                            try:
+                                st.image(str(row['image_data']), use_container_width=True)
+                            except:
+                                st.write("*(Lỗi tải ảnh)*")
                             
                         st.subheader(row['name'])
                         st.write(f"Mã: {row['product_code']} | KT: {row['size']}")
@@ -67,7 +66,7 @@ with tab1:
                         if st.button("🛒 Thêm vào giỏ", key=f"add_{row['id']}"):
                             code = row['product_code']
                             st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
-                            st.session_state.saved_order = False # Reset trạng thái lưu
+                            st.session_state.saved_order = False
                             st.toast("✅ Đã thêm vào giỏ hàng!")
     except Exception as e:
         st.error(f"Lỗi kết nối CSDL: {e}")
@@ -100,16 +99,14 @@ with tab2:
                         cart_list.append({"Mã": code, "Tên": prod['name'], "SL": qty, "Tiền": line_total})
                         st.write(f"- **{prod['name']}** (SL: {qty}) : {line_total:,} đ")
                 st.write(f"### Tổng cộng: {total_price:,} đ")
-            except:
-                st.error("Lỗi đọc giỏ hàng.")
+            except: pass
 
-            # CHỐT ĐƠN VÀ LƯU FILE
             if st.session_state.cust_name and st.session_state.cust_phone and cart_list:
                 st.divider()
-                st.subheader("🎉 Chọn định dạng tải đơn hàng (Hệ thống sẽ tự động lưu đơn cho xưởng):")
+                st.subheader("🎉 Chọn định dạng tải đơn hàng:")
                 col_btn_pdf, col_btn_img = st.columns(2)
                 
-                # 1. TẠO PDF
+                # XUẤT PDF
                 pdf_bytes = None
                 try:
                     pdf = FPDF()
@@ -162,7 +159,7 @@ with tab2:
                     pdf_bytes = bytes(pdf.output())
                 except: pass
 
-                # 2. TẠO ẢNH JPG
+                # XUẤT ẢNH
                 img_bytes = None
                 try:
                     img_height = max(550, 350 + len(cart_list)*40 + 50)
@@ -216,7 +213,6 @@ with tab2:
                     img_bytes = buf.getvalue()
                 except: pass
 
-                # Xử lý Nút tải & Lưu DB
                 with col_btn_pdf:
                     if pdf_bytes:
                         if st.download_button("📄 Lưu file PDF", data=pdf_bytes, file_name=f"Phieu_{st.session_state.cust_name}.pdf", mime="application/pdf", use_container_width=True):
