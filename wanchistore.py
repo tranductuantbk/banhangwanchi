@@ -11,29 +11,6 @@ import re
 
 st.set_page_config(page_title="Bán Hàng Wanchi", layout="wide")
 
-# ==========================================
-# CÔNG CỤ ẨN BÊN THANH SIDEBAR (DÀNH CHO ADMIN)
-# ==========================================
-with st.sidebar:
-    st.header("🛠️ Tiện ích xưởng")
-    with st.expander("🔗 Đổi Link Ảnh Google Drive", expanded=False):
-        st.caption("Dùng để lấy link trực tiếp dán vào trang Thêm Sản Phẩm.")
-        raw_link = st.text_input("Dán link ảnh từ Drive:")
-        if raw_link:
-            if "/file/d/" in raw_link:
-                match = re.search(r"/file/d/([a-zA-Z0-9_-]+)", raw_link)
-                if match:
-                    img_link = f"https://drive.google.com/thumbnail?id={match.group(1)}&sz=w1000"
-                    st.success("✅ Copy link ở khung đen bên dưới:")
-                    st.code(img_link)
-            elif "/folders/" in raw_link:
-                st.error("❌ Đây là link THƯ MỤC. Hãy mở to ảnh ra và copy lại.")
-            elif "drive.google.com/uc?id=" in raw_link:
-                st.info("Link này đã chuẩn sẵn rồi!")
-                st.code(raw_link)
-            else:
-                st.error("❌ Link chưa đúng định dạng /file/d/")
-
 if 'cart' not in st.session_state:
     st.session_state.cart = {}
 if 'cust_name' not in st.session_state:
