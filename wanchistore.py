@@ -44,50 +44,99 @@ with tab1:
         if df_products.empty:
             st.info("Hiện tại chưa có sản phẩm nào. Vui lòng vào trang Admin để thêm.")
         else:
-            # Đã loại bỏ hoàn toàn phần Header Tiêu đề theo yêu cầu
-
-            # --- DANH SÁCH SẢN PHẨM ---
-            for i, row in df_products.iterrows():
+            # ==========================================
+            # KHU VỰC BỘ LỌC TÌM KIẾM THÔNG MINH
+            # ==========================================
+            with st.container(border=True):
+                st.write("### 🔍 Tìm kiếm sản phẩm")
+                col_search_1, col_search_2 = st.columns(2)
                 
-                # Bọc mỗi sản phẩm vào một khung có viền bao quanh để phân biệt rạch ròi
-                with st.container(border=True):
-                    c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 2, 3, 2, 2, 2, 2])
+                search_kw = col_search_1.text_input("🏷️ Tìm theo Mã SP hoặc Tên SP:")
+                search_dim = col_search_2.text_input("📏 Tìm theo Kích thước (VD: 240 hoặc 240x160) - Sai số ±5mm:")
+                
+                # --- XỬ LÝ LỌC DỮ LIỆU ---
+                if search_kw:
+                    kw = search_kw.lower()
+                    df_products = df_products[
+                        df_products['product_code'].str.lower().str.contains(kw, na=False) |
+                        df_products['name'].str.lower().str.contains(kw, na=False)
+                    ]
+                
+                if search_dim:
+                    # Rút trích các con số khách hàng nhập vào (VD: "240x160" -> [240, 160])
+                    user_dims = [int(n) for n in re.findall(r'\d+', search_dim)]
                     
-                    with c1:
-                        with st.popover("🔍 Xem thông tin"):
-                            raw_img_url = str(row['image_data']).strip() if pd.notna(row['image_data']) else ""
-                            display_url = ""
-                            if raw_img_url:
-                                match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_img_url)
-                                if match:
-                                    display_url = f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
-                                else:
-                                    display_url = raw_img_url
+                    if user_dims:
+                        def check_size_tolerance(size_str):
+                            if pd.isna(size_str): return False
+                            # Rút trích các con số từ CSDL của sản phẩm
+                            prod_nums = [int(n) for n in re.findall(r'\d+', str(size_str))]
+                            used_p = set() # Tránh 1 cạnh của sản phẩm bị map 2 lần
                             
-                            if display_url: 
-                                st.image(display_url, use_container_width=True)
-                            else: 
-                                st.info("Sản phẩm này chưa cập nhật hình ảnh.")
-                                
-                            st.write(f"📝 **Chi tiết:** {row['description'] if pd.notna(row['description']) and str(row['description']).strip() != '' else 'Đang cập nhật'}")
+                            # Kiểm tra từng con số khách nhập xem có khớp với số của sản phẩm (+- 5mm) không
+                            for u in user_dims:
+                                matched = False
+                                for i, p in enumerate(prod_nums):
+                                    if i not in used_p and abs(u - p) <= 5:
+                                        matched = True
+                                        used_p.add(i)
+                                        break
+                                if not matched:
+                                    return False
+                            return True
+                        
+                        # Áp dụng hàm lọc kích thước
+                        df_products = df_products[df_products['size'].apply(check_size_tolerance)]
 
-                    # Thêm tiền tố để rõ nghĩa vì không còn tiêu đề
-                    c2.write(f"**Mã:** {row['product_code']}")
-                    c3.write(f"**{row['name']}**")
-                    c4.write(f"**KT:** {row['size']}")
-                    
-                    price = row['price'] if pd.notna(row['price']) else 0
-                    c5.write(f"**{int(price):,} đ**")
-                    
-                    with c6:
-                        qty = st.number_input("SL", min_value=1, value=100, step=10, key=f"qty_{row['id']}", label_visibility="collapsed")
-                    
-                    with c7:
-                        if st.button("🛒 Thêm giỏ", key=f"add_{row['id']}", use_container_width=True):
-                            code = row['product_code']
-                            st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
-                            st.session_state.saved_order = False
-                            st.toast("✅ Đã thêm vào giỏ hàng!")
+            # ==========================================
+            # HIỂN THỊ DANH SÁCH SẢN PHẨM SAU KHI LỌC
+            # ==========================================
+            if df_products.empty:
+                st.warning("⚠️ Không tìm thấy sản phẩm nào phù hợp với điều kiện tìm kiếm của bạn.")
+            else:
+                st.success(f"📦 Tìm thấy {len(df_products)} sản phẩm.")
+                st.divider()
+
+                for i, row in df_products.iterrows():
+                    # Bọc mỗi sản phẩm vào một khung có viền bao quanh để phân biệt rạch ròi
+                    with st.container(border=True):
+                        c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 2, 3, 2, 2, 2, 2])
+                        
+                        with c1:
+                            with st.popover("🔍 Xem thông tin"):
+                                raw_img_url = str(row['image_data']).strip() if pd.notna(row['image_data']) else ""
+                                display_url = ""
+                                if raw_img_url:
+                                    match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_img_url)
+                                    if match:
+                                        display_url = f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
+                                    else:
+                                        display_url = raw_img_url
+                                
+                                if display_url: 
+                                    st.image(display_url, use_container_width=True)
+                                else: 
+                                    st.info("Sản phẩm này chưa cập nhật hình ảnh.")
+                                    
+                                st.write(f"📝 **Chi tiết:** {row['description'] if pd.notna(row['description']) and str(row['description']).strip() != '' else 'Đang cập nhật'}")
+
+                        # Thông tin sản phẩm
+                        c2.write(f"**Mã:** {row['product_code']}")
+                        c3.write(f"**{row['name']}**")
+                        c4.write(f"**KT:** {row['size']}")
+                        
+                        price = row['price'] if pd.notna(row['price']) else 0
+                        c5.write(f"**{int(price):,} đ**")
+                        
+                        with c6:
+                            qty = st.number_input("SL", min_value=1, value=100, step=10, key=f"qty_{row['id']}", label_visibility="collapsed")
+                        
+                        with c7:
+                            if st.button("🛒 Thêm giỏ", key=f"add_{row['id']}", use_container_width=True):
+                                code = row['product_code']
+                                st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
+                                st.session_state.saved_order = False
+                                st.toast("✅ Đã thêm vào giỏ hàng!")
 
     except Exception as e:
         st.error(f"Lỗi kết nối CSDL: {e}")
