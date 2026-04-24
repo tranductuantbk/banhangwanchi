@@ -67,7 +67,7 @@ with tab1:
         if df_products.empty:
             st.info("Hiện tại chưa có sản phẩm nào. Vui lòng vào trang Admin để thêm.")
         else:
-            # --- HEADER DẠNG BẢNG GIỐNG FILE PDF ---
+            # --- HEADER DẠNG BẢNG ---
             h1, h2, h3, h4, h5, h6, h7 = st.columns([2, 2, 3, 2, 2, 2, 2])
             with h1: st.markdown("**Hình ảnh**")
             with h2: st.markdown("**Mã SP**")
@@ -78,14 +78,13 @@ with tab1:
             with h7: st.markdown("**Thao tác**")
             st.divider()
 
-            # --- DANH SÁCH SẢN PHẨM TRẢI NGANG ---
+            # --- DANH SÁCH SẢN PHẨM ---
             for i, row in df_products.iterrows():
                 c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 2, 3, 2, 2, 2, 2])
                 
                 with c1:
-                    # Nút Xem thông tin (Popover) thay thế cho ảnh tĩnh
+                    # Nút Xem thông tin (Popover) - Chỉ để 1 ảnh
                     with st.popover("🔍 Xem thông tin"):
-                        # Bộ lọc link ảnh chuẩn
                         raw_img_url = str(row['image_data']).strip() if pd.notna(row['image_data']) else ""
                         display_url = ""
                         if raw_img_url:
@@ -95,19 +94,15 @@ with tab1:
                             else:
                                 display_url = raw_img_url
                         
-                        # Hiện 2 hình ảnh theo yêu cầu 
-                        img_col1, img_col2 = st.columns(2)
-                        with img_col1:
-                            if display_url: st.image(display_url, use_container_width=True)
-                            else: st.write("*(Chưa có ảnh)*")
-                        with img_col2:
-                            if display_url: st.image(display_url, use_container_width=True) # Hiện 2 ảnh giống nhau tạm thời
-                            else: st.write("*(Chưa có ảnh)*")
+                        # Hiển thị 1 hình ảnh duy nhất
+                        if display_url: 
+                            st.image(display_url, use_container_width=True)
+                        else: 
+                            st.info("Sản phẩm này chưa cập nhật hình ảnh.")
                             
                         # Dòng ghi thông tin sản phẩm
                         st.write(f"📝 **Chi tiết:** {row['description'] if pd.notna(row['description']) and str(row['description']).strip() != '' else 'Đang cập nhật'}")
 
-                # Các cột thông tin tương ứng như bảng báo giá
                 c2.write(row['product_code'])
                 c3.write(row['name'])
                 c4.write(row['size'])
@@ -116,24 +111,22 @@ with tab1:
                 c5.write(f"**{int(price):,} đ**")
                 
                 with c6:
-                    # Cột nhập số lượng
                     qty = st.number_input("SL", min_value=1, value=100, step=10, key=f"qty_{row['id']}", label_visibility="collapsed")
                 
                 with c7:
-                    # Cột nút bấm thêm giỏ hàng
                     if st.button("🛒 Thêm giỏ", key=f"add_{row['id']}", use_container_width=True):
                         code = row['product_code']
                         st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
                         st.session_state.saved_order = False
                         st.toast("✅ Đã thêm vào giỏ hàng!")
                 
-                st.divider() # Dòng kẻ ngang phân cách từng sản phẩm
+                st.divider()
 
     except Exception as e:
         st.error(f"Lỗi kết nối CSDL: {e}")
 
 # ==========================================
-# TAB 2: GIỎ HÀNG VÀ CHỐT ĐƠN (GIỮ NGUYÊN)
+# TAB 2: GIỎ HÀNG VÀ CHỐT ĐƠN
 # ==========================================
 with tab2:
     col1, col2 = st.columns([1, 2])
