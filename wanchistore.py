@@ -7,8 +7,32 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 import os
 import base64
+import re
 
 st.set_page_config(page_title="Bán Hàng Wanchi", layout="wide")
+
+# ==========================================
+# CÔNG CỤ ẨN BÊN THANH SIDEBAR (DÀNH CHO ADMIN)
+# ==========================================
+with st.sidebar:
+    st.header("🛠️ Tiện ích xưởng")
+    with st.expander("🔗 Đổi Link Ảnh Google Drive", expanded=False):
+        st.caption("Dùng để lấy link trực tiếp dán vào trang Thêm Sản Phẩm.")
+        raw_link = st.text_input("Dán link ảnh từ Drive:")
+        if raw_link:
+            if "/file/d/" in raw_link:
+                match = re.search(r"/file/d/([a-zA-Z0-9_-]+)", raw_link)
+                if match:
+                    img_link = f"https://drive.google.com/thumbnail?id={match.group(1)}&sz=w1000"
+                    st.success("✅ Copy link ở khung đen bên dưới:")
+                    st.code(img_link)
+            elif "/folders/" in raw_link:
+                st.error("❌ Đây là link THƯ MỤC. Hãy mở to ảnh ra và copy lại.")
+            elif "drive.google.com/uc?id=" in raw_link:
+                st.info("Link này đã chuẩn sẵn rồi!")
+                st.code(raw_link)
+            else:
+                st.error("❌ Link chưa đúng định dạng /file/d/")
 
 if 'cart' not in st.session_state:
     st.session_state.cart = {}
@@ -43,34 +67,74 @@ with tab1:
         if df_products.empty:
             st.info("Hiện tại chưa có sản phẩm nào. Vui lòng vào trang Admin để thêm.")
         else:
-            cols = st.columns(3)
+            # --- HEADER DẠNG BẢNG GIỐNG FILE PDF ---
+            h1, h2, h3, h4, h5, h6, h7 = st.columns([2, 2, 3, 2, 2, 2, 2])
+            with h1: st.markdown("**Hình ảnh**")
+            with h2: st.markdown("**Mã SP**")
+            with h3: st.markdown("**Diễn giải**")
+            with h4: st.markdown("**Kích thước**")
+            with h5: st.markdown("**Đơn giá**")
+            with h6: st.markdown("**Số lượng**")
+            with h7: st.markdown("**Thao tác**")
+            st.divider()
+
+            # --- DANH SÁCH SẢN PHẨM TRẢI NGANG ---
             for i, row in df_products.iterrows():
-                with cols[i % 3]:
-                    with st.container(border=True):
-                        # ĐỌC ẢNH TỪ ĐƯỜNG LINK THAY VÌ BASE64
-                        if pd.notna(row['image_data']) and str(row['image_data']).strip() != "":
-                            try:
-                                st.image(str(row['image_data']), use_container_width=True)
-                            except:
-                                st.write("*(Lỗi tải ảnh)*")
+                c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 2, 3, 2, 2, 2, 2])
+                
+                with c1:
+                    # Nút Xem thông tin (Popover) thay thế cho ảnh tĩnh
+                    with st.popover("🔍 Xem thông tin"):
+                        # Bộ lọc link ảnh chuẩn
+                        raw_img_url = str(row['image_data']).strip() if pd.notna(row['image_data']) else ""
+                        display_url = ""
+                        if raw_img_url:
+                            match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_img_url)
+                            if match:
+                                display_url = f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
+                            else:
+                                display_url = raw_img_url
+                        
+                        # Hiện 2 hình ảnh theo yêu cầu 
+                        img_col1, img_col2 = st.columns(2)
+                        with img_col1:
+                            if display_url: st.image(display_url, use_container_width=True)
+                            else: st.write("*(Chưa có ảnh)*")
+                        with img_col2:
+                            if display_url: st.image(display_url, use_container_width=True) # Hiện 2 ảnh giống nhau tạm thời
+                            else: st.write("*(Chưa có ảnh)*")
                             
-                        st.subheader(row['name'])
-                        st.write(f"Mã: {row['product_code']} | KT: {row['size']}")
-                        price = row['price'] if pd.notna(row['price']) else 0
-                        st.write(f"Giá: **{int(price):,} đ**")
-                        
-                        with st.expander("Chi tiết"):
-                            st.write(row['description'] if pd.notna(row['description']) else '')
-                        
-                        qty = st.number_input("Số lượng", min_value=1, value=100, step=10, key=f"qty_{row['id']}")
-                        if st.button("🛒 Thêm vào giỏ", key=f"add_{row['id']}"):
-                            code = row['product_code']
-                            st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
-                            st.session_state.saved_order = False
-                            st.toast("✅ Đã thêm vào giỏ hàng!")
+                        # Dòng ghi thông tin sản phẩm
+                        st.write(f"📝 **Chi tiết:** {row['description'] if pd.notna(row['description']) and str(row['description']).strip() != '' else 'Đang cập nhật'}")
+
+                # Các cột thông tin tương ứng như bảng báo giá
+                c2.write(row['product_code'])
+                c3.write(row['name'])
+                c4.write(row['size'])
+                
+                price = row['price'] if pd.notna(row['price']) else 0
+                c5.write(f"**{int(price):,} đ**")
+                
+                with c6:
+                    # Cột nhập số lượng
+                    qty = st.number_input("SL", min_value=1, value=100, step=10, key=f"qty_{row['id']}", label_visibility="collapsed")
+                
+                with c7:
+                    # Cột nút bấm thêm giỏ hàng
+                    if st.button("🛒 Thêm giỏ", key=f"add_{row['id']}", use_container_width=True):
+                        code = row['product_code']
+                        st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
+                        st.session_state.saved_order = False
+                        st.toast("✅ Đã thêm vào giỏ hàng!")
+                
+                st.divider() # Dòng kẻ ngang phân cách từng sản phẩm
+
     except Exception as e:
         st.error(f"Lỗi kết nối CSDL: {e}")
 
+# ==========================================
+# TAB 2: GIỎ HÀNG VÀ CHỐT ĐƠN (GIỮ NGUYÊN)
+# ==========================================
 with tab2:
     col1, col2 = st.columns([1, 2])
     with col1:
