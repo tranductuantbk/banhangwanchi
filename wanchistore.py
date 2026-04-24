@@ -44,60 +44,50 @@ with tab1:
         if df_products.empty:
             st.info("Hiện tại chưa có sản phẩm nào. Vui lòng vào trang Admin để thêm.")
         else:
-            # --- HEADER DẠNG BẢNG ---
-            h1, h2, h3, h4, h5, h6, h7 = st.columns([2, 2, 3, 2, 2, 2, 2])
-            with h1: st.markdown("**Hình ảnh**")
-            with h2: st.markdown("**Mã SP**")
-            with h3: st.markdown("**Diễn giải**")
-            with h4: st.markdown("**Kích thước**")
-            with h5: st.markdown("**Đơn giá**")
-            with h6: st.markdown("**Số lượng**")
-            with h7: st.markdown("**Thao tác**")
-            st.divider()
+            # Đã loại bỏ hoàn toàn phần Header Tiêu đề theo yêu cầu
 
             # --- DANH SÁCH SẢN PHẨM ---
             for i, row in df_products.iterrows():
-                c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 2, 3, 2, 2, 2, 2])
                 
-                with c1:
-                    # Nút Xem thông tin (Popover) - Chỉ để 1 ảnh
-                    with st.popover("🔍 Xem thông tin"):
-                        raw_img_url = str(row['image_data']).strip() if pd.notna(row['image_data']) else ""
-                        display_url = ""
-                        if raw_img_url:
-                            match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_img_url)
-                            if match:
-                                display_url = f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
-                            else:
-                                display_url = raw_img_url
-                        
-                        # Hiển thị 1 hình ảnh duy nhất
-                        if display_url: 
-                            st.image(display_url, use_container_width=True)
-                        else: 
-                            st.info("Sản phẩm này chưa cập nhật hình ảnh.")
+                # Bọc mỗi sản phẩm vào một khung có viền bao quanh để phân biệt rạch ròi
+                with st.container(border=True):
+                    c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 2, 3, 2, 2, 2, 2])
+                    
+                    with c1:
+                        with st.popover("🔍 Xem thông tin"):
+                            raw_img_url = str(row['image_data']).strip() if pd.notna(row['image_data']) else ""
+                            display_url = ""
+                            if raw_img_url:
+                                match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_img_url)
+                                if match:
+                                    display_url = f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
+                                else:
+                                    display_url = raw_img_url
                             
-                        # Dòng ghi thông tin sản phẩm
-                        st.write(f"📝 **Chi tiết:** {row['description'] if pd.notna(row['description']) and str(row['description']).strip() != '' else 'Đang cập nhật'}")
+                            if display_url: 
+                                st.image(display_url, use_container_width=True)
+                            else: 
+                                st.info("Sản phẩm này chưa cập nhật hình ảnh.")
+                                
+                            st.write(f"📝 **Chi tiết:** {row['description'] if pd.notna(row['description']) and str(row['description']).strip() != '' else 'Đang cập nhật'}")
 
-                c2.write(row['product_code'])
-                c3.write(row['name'])
-                c4.write(row['size'])
-                
-                price = row['price'] if pd.notna(row['price']) else 0
-                c5.write(f"**{int(price):,} đ**")
-                
-                with c6:
-                    qty = st.number_input("SL", min_value=1, value=100, step=10, key=f"qty_{row['id']}", label_visibility="collapsed")
-                
-                with c7:
-                    if st.button("🛒 Thêm giỏ", key=f"add_{row['id']}", use_container_width=True):
-                        code = row['product_code']
-                        st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
-                        st.session_state.saved_order = False
-                        st.toast("✅ Đã thêm vào giỏ hàng!")
-                
-                st.divider()
+                    # Thêm tiền tố để rõ nghĩa vì không còn tiêu đề
+                    c2.write(f"**Mã:** {row['product_code']}")
+                    c3.write(f"**{row['name']}**")
+                    c4.write(f"**KT:** {row['size']}")
+                    
+                    price = row['price'] if pd.notna(row['price']) else 0
+                    c5.write(f"**{int(price):,} đ**")
+                    
+                    with c6:
+                        qty = st.number_input("SL", min_value=1, value=100, step=10, key=f"qty_{row['id']}", label_visibility="collapsed")
+                    
+                    with c7:
+                        if st.button("🛒 Thêm giỏ", key=f"add_{row['id']}", use_container_width=True):
+                            code = row['product_code']
+                            st.session_state.cart[code] = st.session_state.cart.get(code, 0) + qty
+                            st.session_state.saved_order = False
+                            st.toast("✅ Đã thêm vào giỏ hàng!")
 
     except Exception as e:
         st.error(f"Lỗi kết nối CSDL: {e}")
