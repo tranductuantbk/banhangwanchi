@@ -77,15 +77,14 @@ def export_pro_pdf(df, mode="AGENCY"):
     pdf.set_fill_color(230, 230, 230)
     pdf.set_font(pdf.font_wanchi, "B", 10)
     
-    # Thiết lập Cột & Chiều cao (Tối ưu hóa gọn gàng)
     if mode == "COMPANY":
         widths = [35, 30, 55, 35, 20, 15]
-        headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"] # Đổi thành Cái
-        row_h = 28 # Làm gọn lại từ 35
+        headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"]
+        row_h = 28
         y_off = 11
     else:
         widths = [35, 70, 45, 20, 20]
-        headers = ["Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"] # Đổi thành Cái
+        headers = ["Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"]
         row_h = 12
         y_off = 3
     
@@ -122,7 +121,6 @@ def export_pro_pdf(df, mode="AGENCY"):
             w_list = widths[1:]
         else: w_list = widths
 
-        # Vẽ dữ liệu các cột
         fields = ['product_code', 'name', 'size']
         for i, f in enumerate(fields):
             pdf.rect(curr_x, y, w_list[i], row_h)
@@ -130,7 +128,6 @@ def export_pro_pdf(df, mode="AGENCY"):
             pdf.multi_cell(w_list[i], 5, txt=str(row.get(f, '')), border=0, align='C')
             curr_x += w_list[i]
 
-        # Đơn giá & Cái
         price_val = row.get('price_agency' if mode == "AGENCY" else 'price_company', 0)
         for i, val in enumerate([f"{int(price_val):,}".replace(",", "."), f"{row['unit_per_pack'] if mode == 'AGENCY' else 1} cái"]):
             pdf.rect(curr_x, y, w_list[3+i], row_h)
@@ -152,8 +149,11 @@ if not st.session_state.is_admin:
             st.session_state.is_admin = True
             st.rerun()
 else:
-    # Đã sửa tên tab thứ 3 thành "Danh sách SP Công ty"
     tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập SP Đại lý", "🏢 Lên đời SP Công ty", "📈 Danh sách SP Công ty", "📜 Đơn hàng"])
+    
+    # ==========================================
+    # TAB 1: NHẬP SP ĐẠI LÝ
+    # ==========================================
     with tab1:
         with st.form("agency_add"):
             c1, c2 = st.columns(2)
@@ -165,12 +165,33 @@ else:
                     s.execute(text("INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) VALUES (:c, :n, :s, :p, :pk) ON CONFLICT (product_code) DO UPDATE SET price_agency=:p, name=:n, size=:s, unit_per_pack=:pk"), {"c":code, "n":name, "s":size, "p":price, "pk":pack})
                     s.commit()
                 st.success("Đã lưu!")
+        
         df_a = conn.query("SELECT * FROM agency_products ORDER BY id DESC", ttl=0)
         if not df_a.empty:
-            st.dataframe(df_a)
-            if st.button("🚀 XUẤT PDF ĐẠI LÝ"):
-                pdf = export_pro_pdf(df_a, mode="AGENCY")
-                st.download_button("📥 TẢI PDF", data=pdf, file_name="Bao_Gia_DaiLy.pdf")
+            st.subheader("📋 Bảng giá hiện tại")
+            st.dataframe(df_a, use_container_width=True)
+            
+            c_pdf, _ = st.columns([1, 2])
+            with c_pdf:
+                if st.button("🚀 XUẤT PDF ĐẠI LÝ"):
+                    pdf = export_pro_pdf(df_a, mode="AGENCY")
+                    st.download_button("📥 TẢI PDF", data=pdf, file_name="Bao_Gia_DaiLy.pdf")
+            
+            st.divider()
+            st.subheader("🗑️ Quản lý / Xóa sản phẩm")
+            for _, row in df_a.iterrows():
+                with st.container(border=True):
+                    col_info, col_del = st.columns([5, 1])
+                    col_info.write(f"**{row['product_code']}** - {row['name']} ({row['size']})")
+                    with col_del:
+                        # Nút xóa có hỏi lại lần nữa bằng Popover
+                        with st.popover("🗑️ Xóa"):
+                            st.warning(f"Xóa SP {row['product_code']}?")
+                            if st.button("Xác nhận xóa", key=f"del_ag_{row['product_code']}"):
+                                with conn.session as s:
+                                    s.execute(text("DELETE FROM agency_products WHERE product_code=:c"), {"c": row['product_code']})
+                                    s.commit()
+                                st.rerun()
 
     with tab2:
         df_a2 = conn.query("SELECT * FROM agency_products", ttl=0)
