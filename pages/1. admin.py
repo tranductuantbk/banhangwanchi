@@ -39,11 +39,34 @@ try:
         """))
         s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
+        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS price_agency NUMERIC;"))
+        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS price_company NUMERIC;"))
+        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS image_data TEXT;"))
+        try: s.execute(text("ALTER TABLE agency_products ADD UNIQUE (product_code);"))
+        except: pass
+        try: s.execute(text("ALTER TABLE company_products ADD UNIQUE (product_code);"))
+        except: pass
         s.commit()
 except: pass
 
-# --- KIỂM TRA TÀI NGUYÊN (FONT & LOGO) ---
-FONT_PATH = "Arial.ttf"
+# ==========================================
+# LỚP BẢO VỆ TÀI NGUYÊN (CHỐNG SẬP WEB)
+# ==========================================
+available_font = None
+for f in ["arial.ttf", "Arial.ttf", "ARIAL.TTF", "arial_dl.ttf"]:
+    if os.path.exists(f):
+        available_font = f
+        break
+
+# Tự động tải font dự phòng nếu máy chủ bị thiếu
+if not available_font:
+    try:
+        r = requests.get("https://github.com/matomo-org/travis-scripts/raw/master/fonts/Arial.ttf", timeout=5)
+        with open("arial_dl.ttf", "wb") as f:
+            f.write(r.content)
+        available_font = "arial_dl.ttf"
+    except: pass
+
 LOGO_FILES = ["logo.png", "logo.jpg", "LOGO.png", "LOGO.jpg"]
 available_logo = None
 for l in LOGO_FILES:
@@ -58,50 +81,47 @@ def convert_drive_link(raw_url):
     if match: return f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
     return raw_url
 
+def register_wanchi_font(pdf):
+    if available_font:
+        try:
+            pdf.add_font("ArialVN", style="", fname=available_font)
+            pdf.add_font("ArialVN", style="B", fname=available_font)
+            return "ArialVN"
+        except: pass
+    return "Helvetica"
+
 class WanchiPDF(FPDF):
     def __init__(self, quote_type="CÔNG TY"):
         super().__init__()
         self.quote_type = quote_type
+        self.font_wanchi = register_wanchi_font(self)
 
     def header_wanchi(self):
-        # Tải Font
-        if os.path.exists(FONT_PATH):
-            self.add_font("ArialVN", style="", fname=FONT_PATH, uni=True)
-            self.add_font("ArialVN", style="B", fname=FONT_PATH, uni=True)
-            font_name = "ArialVN"
-        else:
-            font_name = "Helvetica"
-
         # 1. Chèn Logo
         if available_logo:
             self.image(available_logo, x=10, y=8, h=15)
         else:
-            self.set_font(font_name, "B", 18)
+            self.set_font(self.font_wanchi, "B", 18)
             self.cell(100, 10, "WANCHI", border=0, align='L')
         
         # 2. Thông tin bên phải
-        self.set_font(font_name, "B", 10)
+        self.set_font(self.font_wanchi, "B", 10)
         self.set_xy(130, 8)
         self.multi_cell(70, 5, txt=f"BẢNG BÁO GIÁ {self.quote_type}\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
         self.ln(10)
 
 def export_pro_pdf(df, mode="AGENCY"):
+    if not available_font: return None
+    
     title = "ĐẠI LÝ" if mode == "AGENCY" else "CÔNG TY"
     pdf = WanchiPDF(quote_type=title)
     pdf.add_page()
-    
-    # Xác định Font
-    if os.path.exists(FONT_PATH):
-        pdf.set_font("ArialVN", size=10)
-        font_name = "ArialVN"
-    else:
-        pdf.set_font("Helvetica", size=10)
-        font_name = "Helvetica"
-        
     pdf.header_wanchi()
     
-    # Header Bảng (Đồng nhất màu xám Wanchi)
+    # Header Bảng
     pdf.set_fill_color(230, 230, 230)
+    pdf.set_font(pdf.font_wanchi, "B", 10)
+    
     widths = [40, 30, 50, 35, 20, 15]
     headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
     
@@ -110,16 +130,18 @@ def export_pro_pdf(df, mode="AGENCY"):
     pdf.ln()
     
     # Nội dung Bảng
-    pdf.set_font(font_name, "", 9)
+    pdf.set_font(pdf.font_wanchi, "", 9)
     row_h = 35 
     
     for _, row in df.iterrows():
         if pdf.get_y() + row_h > 270:
             pdf.add_page()
             pdf.set_fill_color(230, 230, 230)
+            pdf.set_font(pdf.font_wanchi, "B", 10)
             for i, head in enumerate(headers):
                 pdf.cell(widths[i], 12, txt=head, border=1, fill=True, align='C')
             pdf.ln()
+            pdf.set_font(pdf.font_wanchi, "", 9)
 
         x, y = pdf.get_x(), pdf.get_y()
 
@@ -136,25 +158,25 @@ def export_pro_pdf(df, mode="AGENCY"):
                     os.remove(tmp.name)
             except: pass
 
-        # 2. Mã SP (Canh giữa)
+        # 2. Mã SP
         pdf.set_xy(x + widths[0], y)
         pdf.rect(x + widths[0], y, widths[1], row_h)
         pdf.set_xy(x + widths[0], y + 15)
         pdf.multi_cell(widths[1], 5, txt=str(row.get('product_code', '')), border=0, align='C')
 
-        # 3. Diễn giải (Canh giữa)
+        # 3. Diễn giải
         curr_x = x + widths[0] + widths[1]
         pdf.rect(curr_x, y, widths[2], row_h)
         pdf.set_xy(curr_x + 2, y + 10)
         pdf.multi_cell(widths[2]-4, 5, txt=str(row.get('name', '')), border=0, align='C')
 
-        # 4. Kích thước (Nằm ngang chuẩn)
+        # 4. Kích thước
         curr_x += widths[2]
         pdf.rect(curr_x, y, widths[3], row_h)
         pdf.set_xy(curr_x + 2, y + 12)
         pdf.multi_cell(widths[3]-4, 5, txt=str(row.get('size', '')), border=0, align='C')
 
-        # 5. Đơn giá (Lấy theo chế độ)
+        # 5. Đơn giá
         curr_x += widths[3]
         pdf.rect(curr_x, y, widths[4], row_h)
         pdf.set_xy(curr_x, y + 15)
@@ -162,7 +184,7 @@ def export_pro_pdf(df, mode="AGENCY"):
         price_str = f"{int(price_val):,}".replace(",", ".")
         pdf.cell(widths[4], 5, txt=price_str, border=0, align='C')
 
-        # 6. Lốc (Lấy theo chế độ)
+        # 6. Lốc
         curr_x += widths[4]
         pdf.rect(curr_x, y, widths[5], row_h)
         pdf.set_xy(curr_x, y + 15)
@@ -210,10 +232,14 @@ else:
         df_a = conn.query("SELECT * FROM agency_products ORDER BY id DESC", ttl=0)
         if not df_a.empty:
             st.dataframe(df_a[['product_code', 'name', 'size', 'price_agency', 'unit_per_pack']])
-            if st.button("🚀 XUẤT PDF BÁO GIÁ ĐẠI LÝ CHUYÊN NGHIỆP"):
-                with st.spinner("Đang đóng gói file..."):
-                    pdf_agency = export_pro_pdf(df_a, mode="AGENCY")
-                    st.download_button("📥 TẢI PDF ĐẠI LÝ", data=pdf_agency, file_name=f"Bao_Gia_DaiLy_Wanchi_{datetime.now().strftime('%d%m%y')}.pdf", mime="application/pdf")
+            if not available_font:
+                st.error("⚠️ TÍNH NĂNG XUẤT PDF BỊ KHÓA: Đang tải font dự phòng, vui lòng F5 lại trang.")
+            else:
+                if st.button("🚀 XUẤT PDF BÁO GIÁ ĐẠI LÝ CHUYÊN NGHIỆP"):
+                    with st.spinner("Đang đóng gói file..."):
+                        pdf_agency = export_pro_pdf(df_a, mode="AGENCY")
+                        if pdf_agency:
+                            st.download_button("📥 TẢI PDF ĐẠI LÝ", data=pdf_agency, file_name=f"Bao_Gia_DaiLy_Wanchi_{datetime.now().strftime('%d%m%y')}.pdf", mime="application/pdf")
 
     with tab2:
         st.subheader("Bước 2: Gắn ảnh thiết kế & Tính giá Công ty")
@@ -240,10 +266,14 @@ else:
         df_c = conn.query("SELECT * FROM company_products ORDER BY id DESC", ttl=0)
         if not df_c.empty:
             st.dataframe(df_c[['product_code', 'name', 'size', 'price_company']])
-            if st.button("🚀 XUẤT PDF BÁO GIÁ CÔNG TY (KÈM ẢNH)"):
-                with st.spinner("Đang tải ảnh và đóng gói..."):
-                    pdf_company = export_pro_pdf(df_c, mode="COMPANY")
-                    st.download_button("📥 TẢI PDF CÔNG TY", data=pdf_company, file_name=f"Bao_Gia_Wanchi_{datetime.now().strftime('%d%m%y')}.pdf", mime="application/pdf")
+            if not available_font:
+                st.error("⚠️ TÍNH NĂNG XUẤT PDF BỊ KHÓA: Đang tải font dự phòng, vui lòng F5 lại trang.")
+            else:
+                if st.button("🚀 XUẤT PDF BÁO GIÁ CÔNG TY (KÈM ẢNH)"):
+                    with st.spinner("Đang tải ảnh và đóng gói..."):
+                        pdf_company = export_pro_pdf(df_c, mode="COMPANY")
+                        if pdf_company:
+                            st.download_button("📥 TẢI PDF CÔNG TY", data=pdf_company, file_name=f"Bao_Gia_Wanchi_{datetime.now().strftime('%d%m%y')}.pdf", mime="application/pdf")
 
     with tab4:
         st.subheader("Lịch sử Đơn hàng")
