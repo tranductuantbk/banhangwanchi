@@ -128,11 +128,18 @@ else:
             if st.form_submit_button("Lưu vào kho Đại lý"):
                 try:
                     with conn.session as s:
+                        # Ép kiểu dữ liệu tiêu chuẩn
                         s.execute(text("""
                             INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) 
                             VALUES (:c, :n, :s, :p, :pk)
                             ON CONFLICT (product_code) DO UPDATE SET name=:n, size=:s, price_agency=:p, unit_per_pack=:pk
-                        """), {"c": a_code, "n": a_name, "s": a_size, "p": a_price, "pk": a_pack})
+                        """), {
+                            "c": str(a_code), 
+                            "n": str(a_name), 
+                            "s": str(a_size), 
+                            "p": float(a_price), 
+                            "pk": int(a_pack)
+                        })
                         s.commit()
                     st.success(f"✅ Đã thêm/cập nhật SP Đại lý: {a_name}")
                 except Exception as e:
@@ -179,12 +186,19 @@ else:
                         try:
                             img_final = convert_drive_link(raw_img)
                             with conn.session as s:
+                                # Ép tất cả biến thành kiểu mặc định của Python để tránh lỗi np.float64
                                 s.execute(text("""
                                     INSERT INTO company_products (product_code, name, size, price_agency, price_company, image_data)
                                     VALUES (:c, :n, :s, :pa, :pc, :i)
                                     ON CONFLICT (product_code) DO UPDATE SET price_company = :pc, image_data = :i
-                                """), {"c": target['product_code'], "n": target['name'], "s": target['size'], 
-                                       "pa": target['price_agency'], "pc": price_co, "i": img_final})
+                                """), {
+                                    "c": str(target['product_code']), 
+                                    "n": str(target['name']), 
+                                    "s": str(target['size']) if pd.notna(target['size']) else "", 
+                                    "pa": float(target['price_agency']), 
+                                    "pc": float(price_co), 
+                                    "i": str(img_final)
+                                })
                                 s.commit()
                             st.success("✅ Đã cập nhật sản phẩm vào kho Công ty!")
                         except Exception as e:
