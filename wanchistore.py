@@ -40,9 +40,10 @@ tab1, tab2 = st.tabs(["📦 Danh sách sản phẩm", "🛒 Giỏ hàng & Chốt
 
 with tab1:
     try:
-        df_products = conn.query("SELECT * FROM products ORDER BY id", ttl=0)
+        # Đã đổi nguồn cấp dữ liệu sang kho Công ty (company_products)
+        df_products = conn.query("SELECT * FROM company_products ORDER BY id", ttl=0)
         if df_products.empty:
-            st.info("Hiện tại chưa có sản phẩm nào. Vui lòng vào trang Admin để thêm.")
+            st.info("Hiện tại chưa có sản phẩm nào. Vui lòng vào trang Admin để 'Lên đời SP Công ty'.")
         else:
             # ==========================================
             # KHU VỰC BỘ LỌC TÌM KIẾM THÔNG MINH
@@ -118,14 +119,16 @@ with tab1:
                                 else: 
                                     st.info("Sản phẩm này chưa cập nhật hình ảnh.")
                                     
-                                st.write(f"📝 **Chi tiết:** {row['description'] if pd.notna(row['description']) and str(row['description']).strip() != '' else 'Đang cập nhật'}")
+                                # Lấy tên làm chi tiết phụ
+                                st.write(f"📝 **Chi tiết:** {row['name']}")
 
                         # Thông tin sản phẩm
                         c2.write(f"**Mã:** {row['product_code']}")
                         c3.write(f"**{row['name']}**")
                         c4.write(f"**KT:** {row['size']}")
                         
-                        price = row['price'] if pd.notna(row['price']) else 0
+                        # Đã cập nhật lấy giá từ price_company
+                        price = row['price_company'] if pd.notna(row['price_company']) else 0
                         c5.write(f"**{int(price):,} đ**")
                         
                         with c6:
@@ -161,12 +164,14 @@ with tab2:
             total_price = 0
             cart_list = []
             try:
-                df_products_cart = conn.query("SELECT * FROM products", ttl=0)
+                # Đã đổi nguồn cấp dữ liệu sang kho Công ty cho giỏ hàng
+                df_products_cart = conn.query("SELECT * FROM company_products", ttl=0)
                 for code, qty in st.session_state.cart.items():
                     prod_match = df_products_cart[df_products_cart['product_code'] == code]
                     if not prod_match.empty:
                         prod = prod_match.iloc[0]
-                        price = prod['price'] if pd.notna(prod['price']) else 0
+                        # Đã cập nhật lấy giá từ price_company
+                        price = prod['price_company'] if pd.notna(prod['price_company']) else 0
                         line_total = int(price) * qty
                         total_price += line_total
                         cart_list.append({"Mã": code, "Tên": prod['name'], "SL": qty, "Tiền": line_total})
