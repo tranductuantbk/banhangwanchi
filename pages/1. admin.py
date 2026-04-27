@@ -8,19 +8,21 @@ from datetime import datetime
 import requests
 import tempfile
 import os
-import urllib.request
 
 st.set_page_config(page_title="Wanchi Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 # ==========================================
-# KHỐI TỰ ĐỘNG TẢI FONT TIẾNG VIỆT
+# KHỐI TỰ ĐỘNG TẢI FONT TIẾNG VIỆT (DEJAVU SANS - CỰC KỲ ỔN ĐỊNH)
 # ==========================================
-FONT_PATH = "arial.ttf"
+FONT_PATH = "DejaVuSans.ttf"
 if not os.path.exists(FONT_PATH):
     try:
-        # Tự động tải file arial.ttf từ Github về nếu máy chủ chưa có
-        urllib.request.urlretrieve("https://raw.githubusercontent.com/matomo-org/travis-scripts/master/fonts/Arial.ttf", FONT_PATH)
+        # Sử dụng font DejaVuSans mã nguồn mở, hỗ trợ tiếng Việt cực tốt cho FPDF
+        font_url = "https://raw.githubusercontent.com/fpdf-project/fpdf2/master/test/fonts/DejaVuSans.ttf"
+        r = requests.get(font_url, allow_redirects=True)
+        with open(FONT_PATH, 'wb') as f:
+            f.write(r.content)
     except Exception as e:
         pass
 
@@ -73,17 +75,20 @@ def convert_drive_link(raw_url):
 
 def load_custom_font(pdf, size):
     try:
-        # Cố gắng load font Arial hỗ trợ tiếng Việt
-        pdf.add_font("Arial", style="", fname=FONT_PATH, uni=True)
-        pdf.set_font("Arial", size=size)
-    except Exception:
+        pdf.add_font("DejaVu", style="", fname=FONT_PATH, uni=True)
+        pdf.set_font("DejaVu", size=size)
+    except:
         try:
-            # Dành cho thư viện fpdf2 bản mới không cần uni=True
-            pdf.add_font("Arial", style="", fname=FONT_PATH)
-            pdf.set_font("Arial", size=size)
+            pdf.add_font("DejaVu", style="", fname=FONT_PATH)
+            pdf.set_font("DejaVu", size=size)
         except:
-            # Nếu tải font vẫn thất bại thì dùng Helvetica tạm
             pdf.set_font("Helvetica", size=size)
+
+def set_safe_font(pdf, size):
+    if 'DejaVu' in pdf.fonts or 'dejavu' in pdf.fonts:
+        pdf.set_font("DejaVu", size=size)
+    else:
+        pdf.set_font("Helvetica", size=size)
 
 # --- XUẤT PDF CHO ĐẠI LÝ ---
 def export_pdf(df, title_pdf):
@@ -94,7 +99,7 @@ def export_pdf(df, title_pdf):
     pdf.cell(200, 10, txt=title_pdf, ln=True, align='C')
     pdf.ln(10)
     
-    pdf.set_font("Arial", size=10) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=10)
+    set_safe_font(pdf, 10)
     pdf.set_fill_color(230, 230, 230)
     cols = df.columns.tolist()
     widths = [35, 60, 40, 30, 25]
@@ -103,7 +108,7 @@ def export_pdf(df, title_pdf):
         pdf.cell(widths[i] if i < len(widths) else 30, 10, txt=str(col), border=1, fill=True, align='C')
     pdf.ln()
     
-    pdf.set_font("Arial", size=9) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=9)
+    set_safe_font(pdf, 9)
     for _, row in df.iterrows():
         for i, item in enumerate(row):
             val = f"{int(item):,}" if isinstance(item, (int, float)) and i >= 3 else str(item)
@@ -119,7 +124,7 @@ def export_pdf_company_with_images(df):
         
     # Tiêu đề và Tháng
     pdf.cell(100, 10, txt="WANCHI", ln=0, align='L')
-    pdf.set_font("Arial", size=10) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=10)
+    set_safe_font(pdf, 10)
     pdf.cell(90, 10, txt=datetime.now().strftime("%m/%Y"), ln=1, align='R')
     pdf.ln(5)
     
@@ -133,11 +138,10 @@ def export_pdf_company_with_images(df):
     pdf.ln()
     
     # Vẽ Nội dung và Hình ảnh
-    pdf.set_font("Arial", size=9) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=9)
-    row_height = 25 # Chiều cao của 1 sản phẩm để chứa vừa ảnh
+    set_safe_font(pdf, 9)
+    row_height = 25 
     
     for _, row in df.iterrows():
-        # Qua trang nếu hết chỗ
         if pdf.get_y() + row_height > 280:
             pdf.add_page()
             for i, col in enumerate(headers):
@@ -147,7 +151,7 @@ def export_pdf_company_with_images(df):
         x_start = pdf.get_x()
         y_start = pdf.get_y()
         
-        # 1. Hình ảnh (Tải từ Drive)
+        # 1. Hình ảnh
         pdf.rect(x_start, y_start, widths[0], row_height)
         img_url = row.get('image_data', '')
         if pd.notna(img_url) and str(img_url).strip() != "":
@@ -157,7 +161,6 @@ def export_pdf_company_with_images(df):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                         tmp.write(response.content)
                         tmp_path = tmp.name
-                    # Canh giữa hình vào ô
                     pdf.image(tmp_path, x=x_start + 2, y=y_start + 2, w=widths[0] - 4, h=row_height - 4)
                     os.remove(tmp_path)
             except: pass
@@ -190,7 +193,6 @@ def export_pdf_company_with_images(df):
         pdf.set_xy(x_start + sum(widths[:5]), y_start + 10)
         pdf.cell(widths[5], 5, txt="1 cái", border=0, align='C')
         
-        # Chuyển con trỏ xuống dòng tiếp theo
         pdf.set_xy(x_start, y_start + row_height)
 
     return bytes(pdf.output())
@@ -249,7 +251,6 @@ else:
             df_a = conn.query("SELECT product_code as \"Mã\", name as \"Tên\", size as \"Kích thước\", price_agency as \"Giá ĐL\", unit_per_pack as \"Lốc\" FROM agency_products ORDER BY id DESC", ttl=0)
             if not df_a.empty:
                 st.dataframe(df_a, use_container_width=True)
-                # Lưu file nhanh (Không ảnh)
                 pdf_data_a = export_pdf(df_a, "BANG GIA DAI LY WANCHI")
                 st.download_button("📥 Tải file PDF Đại lý", data=pdf_data_a, file_name="Gia_Dai_Ly_Wanchi.pdf")
             else: st.info("Kho Đại lý hiện đang trống.")
@@ -293,27 +294,24 @@ else:
             else: st.warning("Vui lòng nhập sản phẩm Đại lý trước.")
         except: pass
 
-    # 4. DANH SÁCH SẢN PHẨM CÔNG TY (CÓ TÍNH NĂNG XUẤT ẢNH)
+    # 4. DANH SÁCH SẢN PHẨM CÔNG TY
     with tab4:
         st.subheader("Bảng giá Công ty (Bán lẻ)")
         try:
             df_c = conn.query("SELECT product_code, name, size, price_company, image_data FROM company_products ORDER BY id DESC", ttl=0)
             if not df_c.empty:
-                # Hiển thị trên Web (Giấu link ảnh đi cho gọn)
                 df_display = df_c.rename(columns={"product_code": "Mã", "name": "Tên", "size": "Kích thước", "price_company": "Đơn giá 1 SP"})
                 st.dataframe(df_display.drop(columns=["image_data"]), use_container_width=True)
                 
                 st.write("---")
                 st.write("**Xuất báo giá PDF chuyên nghiệp (kèm Hình Ảnh):**")
                 
-                # Nút Tạo PDF
                 if st.button("🔄 Bấm vào đây để đóng gói file PDF"):
                     with st.spinner("⏳ Hệ thống đang lấy ảnh từ Google Drive để vẽ vào PDF. Có thể mất vài chục giây, vui lòng không tắt trang..."):
                         pdf_data_c = export_pdf_company_with_images(df_c)
                         st.session_state.pdf_company_data = pdf_data_c
                         st.success("✅ Đã tạo xong! Vui lòng bấm nút 'Tải PDF về máy' vừa xuất hiện bên dưới.")
                 
-                # Nút tải hiện ra sau khi tạo xong
                 if 'pdf_company_data' in st.session_state:
                     st.download_button("📥 TẢI PDF VỀ MÁY", data=st.session_state.pdf_company_data, file_name="Bao_Gia_Cong_Ty_Wanchi.pdf", mime="application/pdf")
                     
