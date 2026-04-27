@@ -10,11 +10,11 @@ st.set_page_config(page_title="Wanchi Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 # ==========================================
-# KHỐI TỰ ĐỘNG SỬA LỖI DATABASE (AUTO-FIX)
+# KHỐI TỰ ĐỘNG SỬA LỖI DATABASE (AUTO-FIX BẢN MẠNH NHẤT)
 # ==========================================
 try:
     with conn.session as s:
-        # Tự động tạo bảng nếu lỡ bị xóa
+        # 1. Tạo bảng nếu chưa có
         s.execute(text("""
             CREATE TABLE IF NOT EXISTS agency_products (
                 id SERIAL PRIMARY KEY,
@@ -35,9 +35,22 @@ try:
                 image_data TEXT
             );
         """))
-        # Tự động chèn cột "Lốc" (unit_per_pack) để không bị lỗi đỏ như hình ảnh
+        
+        # 2. Tự động chèn cột nếu bị thiếu trong quá trình sử dụng
         s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
+        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS price_agency NUMERIC;"))
+        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS price_company NUMERIC;"))
+        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS image_data TEXT;"))
+
+        # 3. Ép điều kiện chống trùng lặp (UNIQUE) để lệnh ON CONFLICT hoạt động
+        try:
+            s.execute(text("ALTER TABLE agency_products ADD UNIQUE (product_code);"))
+        except: pass
+        try:
+            s.execute(text("ALTER TABLE company_products ADD UNIQUE (product_code);"))
+        except: pass
+
         s.commit()
 except Exception as e:
     pass
@@ -61,17 +74,15 @@ def export_pdf(df, title_pdf):
     pdf.cell(200, 10, txt=title_pdf, ln=True, align='C')
     pdf.ln(10)
     
-    # Header bảng
     pdf.set_font("Arial", size=10)
     pdf.set_fill_color(230, 230, 230)
     cols = df.columns.tolist()
-    widths = [35, 60, 40, 30, 25] # Căn chỉnh độ rộng từng cột
+    widths = [35, 60, 40, 30, 25]
     
     for i, col in enumerate(cols):
         pdf.cell(widths[i] if i < len(widths) else 30, 10, txt=str(col), border=1, fill=True, align='C')
     pdf.ln()
     
-    # Nội dung
     pdf.set_font("Arial", size=9)
     for _, row in df.iterrows():
         for i, item in enumerate(row):
@@ -115,15 +126,17 @@ else:
             a_pack = st.number_input("Lốc (Số lượng sản phẩm/kiện)", min_value=1, value=100, step=10)
             
             if st.form_submit_button("Lưu vào kho Đại lý"):
-                with conn.session as s:
-                    # Dùng ON CONFLICT để cập nhật nếu lỡ nhập trùng mã, không bị mất dữ liệu
-                    s.execute(text("""
-                        INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) 
-                        VALUES (:c, :n, :s, :p, :pk)
-                        ON CONFLICT (product_code) DO UPDATE SET name=:n, size=:s, price_agency=:p, unit_per_pack=:pk
-                    """), {"c": a_code, "n": a_name, "s": a_size, "p": a_price, "pk": a_pack})
-                    s.commit()
-                st.success(f"✅ Đã thêm/cập nhật SP Đại lý: {a_name}")
+                try:
+                    with conn.session as s:
+                        s.execute(text("""
+                            INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) 
+                            VALUES (:c, :n, :s, :p, :pk)
+                            ON CONFLICT (product_code) DO UPDATE SET name=:n, size=:s, price_agency=:p, unit_per_pack=:pk
+                        """), {"c": a_code, "n": a_name, "s": a_size, "p": a_price, "pk": a_pack})
+                        s.commit()
+                    st.success(f"✅ Đã thêm/cập nhật SP Đại lý: {a_name}")
+                except Exception as e:
+                    st.error(f"❌ Lỗi khi lưu dữ liệu Đại lý: {e}")
 
     # ==========================================
     # 2. DANH SÁCH SP ĐẠI LÝ
@@ -139,7 +152,7 @@ else:
                     st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Dai_Ly_Wanchi.pdf")
             else: st.info("Kho Đại lý hiện đang trống.")
         except Exception as e:
-            st.error("Đang đồng bộ cấu trúc mới, vui lòng tải lại trang (F5) để hiển thị danh sách.")
+            st.error(f"❌ Không thể tải danh sách Đại lý. Lỗi: {e}")
 
     # ==========================================
     # 3. THÊM SẢN PHẨM CÔNG TY
@@ -163,19 +176,22 @@ else:
                     raw_img = st.text_input("🔗 Chèn link ảnh thiết kế (Google Drive)")
                     
                     if st.form_submit_button("Xác nhận chuyển sang kho Công ty"):
-                        img_final = convert_drive_link(raw_img)
-                        with conn.session as s:
-                            s.execute(text("""
-                                INSERT INTO company_products (product_code, name, size, price_agency, price_company, image_data)
-                                VALUES (:c, :n, :s, :pa, :pc, :i)
-                                ON CONFLICT (product_code) DO UPDATE SET price_company = :pc, image_data = :i
-                            """), {"c": target['product_code'], "n": target['name'], "s": target['size'], 
-                                   "pa": target['price_agency'], "pc": price_co, "i": img_final})
-                            s.commit()
-                        st.success("✅ Đã cập nhật sản phẩm vào kho Công ty!")
+                        try:
+                            img_final = convert_drive_link(raw_img)
+                            with conn.session as s:
+                                s.execute(text("""
+                                    INSERT INTO company_products (product_code, name, size, price_agency, price_company, image_data)
+                                    VALUES (:c, :n, :s, :pa, :pc, :i)
+                                    ON CONFLICT (product_code) DO UPDATE SET price_company = :pc, image_data = :i
+                                """), {"c": target['product_code'], "n": target['name'], "s": target['size'], 
+                                       "pa": target['price_agency'], "pc": price_co, "i": img_final})
+                                s.commit()
+                            st.success("✅ Đã cập nhật sản phẩm vào kho Công ty!")
+                        except Exception as e:
+                            st.error(f"❌ Lỗi ghi vào kho Công ty: {e}")
             else: st.warning("Vui lòng nhập sản phẩm Đại lý trước.")
-        except:
-            st.warning("Đang chờ dữ liệu đồng bộ.")
+        except Exception as e:
+            st.error(f"❌ Lỗi lấy dữ liệu: {e}")
 
     # ==========================================
     # 4. DANH SÁCH SẢN PHẨM CÔNG TY
@@ -190,8 +206,8 @@ else:
                     pdf_data = export_pdf(df_c, "BANG GIA CONG TY WANCHI")
                     st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Cong_Ty_Wanchi.pdf")
             else: st.info("Kho Công ty hiện đang trống.")
-        except:
-            pass
+        except Exception as e:
+            st.error(f"❌ Không thể tải danh sách Công ty. Lỗi: {e}")
 
     # ==========================================
     # 5. LƯU TRỮ ĐƠN HÀNG
@@ -213,5 +229,4 @@ else:
                             st.rerun()
                         with st.expander("Xem chi tiết"):
                             st.text(row['order_items'])
-        except:
-            pass
+        except: pass
