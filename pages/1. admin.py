@@ -151,9 +151,6 @@ if not st.session_state.is_admin:
 else:
     tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập SP Đại lý", "🏢 Lên đời SP Công ty", "📈 Danh sách SP Công ty", "📜 Đơn hàng"])
     
-    # ==========================================
-    # TAB 1: NHẬP & QUẢN LÝ SP ĐẠI LÝ
-    # ==========================================
     with tab1:
         with st.form("agency_add"):
             c1, c2 = st.columns(2)
@@ -171,29 +168,19 @@ else:
             st.subheader("📋 Bảng giá hiện tại")
             st.dataframe(df_a, use_container_width=True)
             
-            if not available_font:
-                st.error("⚠️ TÍNH NĂNG XUẤT PDF BỊ KHÓA: Đang tải font dự phòng, vui lòng F5 lại trang.")
-            else:
-                if st.button("🚀 XUẤT PDF ĐẠI LÝ"):
-                    with st.spinner("Đang đóng gói file..."):
-                        pdf_agency = export_pro_pdf(df_a, mode="AGENCY")
-                        if pdf_agency:
-                            st.download_button("📥 TẢI PDF ĐẠI LÝ", data=pdf_agency, file_name=f"Bao_Gia_DaiLy_Wanchi_{datetime.now().strftime('%d%m%y')}.pdf", mime="application/pdf")
+            if st.button("🚀 XUẤT PDF ĐẠI LÝ"):
+                pdf_agency = export_pro_pdf(df_a, mode="AGENCY")
+                st.download_button("📥 TẢI PDF", data=pdf_agency, file_name="Bao_Gia_DaiLy.pdf")
             
-            # Khối quản lý XÓA sản phẩm gọn gàng bằng Selectbox
             st.divider()
-            st.subheader("🗑️ Xóa sản phẩm")
-            
-            # Tạo dictionary để hiển thị tên đẹp trong menu xổ xuống
-            del_options = {row['product_code']: f"[{row['product_code']}] {row['name']} ({row['size']})" for _, row in df_a.iterrows()}
-            del_sel = st.selectbox("Chọn sản phẩm bạn muốn xóa khỏi hệ thống:", options=list(del_options.keys()), format_func=lambda x: del_options[x])
-            
-            # Popover hỏi lại lần nữa
-            with st.popover("🗑️ Bấm vào đây để Xóa SP"):
-                st.warning(f"Bạn có chắc chắn muốn xóa vĩnh viễn sản phẩm **{del_sel}** không?")
-                if st.button("Xác nhận xóa", key="confirm_del_ag"):
+            st.subheader("🗑️ Xóa sản phẩm Đại lý")
+            del_opts_a = {row['product_code']: f"[{row['product_code']}] {row['name']}" for _, row in df_a.iterrows()}
+            sel_a = st.selectbox("Chọn sản phẩm đại lý cần xóa:", options=list(del_opts_a.keys()), format_func=lambda x: del_opts_a[x], key="sel_del_a")
+            with st.popover("🗑️ Xác nhận xóa Đại lý"):
+                st.warning(f"Xóa vĩnh viễn mã {sel_a}?")
+                if st.button("Xác nhận xóa", key="btn_del_a"):
                     with conn.session as s:
-                        s.execute(text("DELETE FROM agency_products WHERE product_code=:c"), {"c": del_sel})
+                        s.execute(text("DELETE FROM agency_products WHERE product_code=:c"), {"c": sel_a})
                         s.commit()
                     st.rerun()
 
@@ -216,10 +203,23 @@ else:
     with tab3:
         df_c = conn.query("SELECT * FROM company_products ORDER BY id DESC", ttl=0)
         if not df_c.empty:
-            st.dataframe(df_c[['product_code', 'name', 'size', 'price_company']])
+            st.dataframe(df_c[['product_code', 'name', 'size', 'price_company']], use_container_width=True)
             if st.button("🚀 XUẤT PDF CÔNG TY"):
                 pdf_c = export_pro_pdf(df_c, mode="COMPANY")
                 st.download_button("📥 TẢI PDF", data=pdf_c, file_name="Bao_Gia_CongTy.pdf")
+            
+            # --- THÊM CHỨC NĂNG XÓA TẠI ĐÂY ---
+            st.divider()
+            st.subheader("🗑️ Xóa sản phẩm Công ty")
+            del_opts_c = {row['product_code']: f"[{row['product_code']}] {row['name']}" for _, row in df_c.iterrows()}
+            sel_c = st.selectbox("Chọn sản phẩm công ty cần xóa:", options=list(del_opts_c.keys()), format_func=lambda x: del_opts_c[x], key="sel_del_c")
+            with st.popover("🗑️ Xác nhận xóa Công ty"):
+                st.warning(f"Xóa vĩnh viễn sản phẩm công ty {sel_c}?\n(Thao tác này không xóa dữ liệu bên Đại lý)")
+                if st.button("Xác nhận xóa", key="btn_del_c"):
+                    with conn.session as s:
+                        s.execute(text("DELETE FROM company_products WHERE product_code=:c"), {"c": sel_c})
+                        s.commit()
+                    st.rerun()
                 
     with tab4:
         df_o = conn.query("SELECT * FROM orders ORDER BY order_date DESC", ttl=0)
