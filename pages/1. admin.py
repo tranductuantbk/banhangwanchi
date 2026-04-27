@@ -152,7 +152,8 @@ if not st.session_state.is_admin:
             st.session_state.is_admin = True
             st.rerun()
 else:
-    tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập SP Đại lý", "🏢 Lên đời SP Công ty", "📈 Danh sách Công ty", "📜 Đơn hàng"])
+    # Đã sửa tên tab thứ 3 thành "Danh sách SP Công ty"
+    tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập SP Đại lý", "🏢 Lên đời SP Công ty", "📈 Danh sách SP Công ty", "📜 Đơn hàng"])
     with tab1:
         with st.form("agency_add"):
             c1, c2 = st.columns(2)
@@ -194,3 +195,18 @@ else:
             if st.button("🚀 XUẤT PDF CÔNG TY"):
                 pdf_c = export_pro_pdf(df_c, mode="COMPANY")
                 st.download_button("📥 TẢI PDF", data=pdf_c, file_name="Bao_Gia_CongTy.pdf")
+                
+    with tab4:
+        df_o = conn.query("SELECT * FROM orders ORDER BY order_date DESC", ttl=0)
+        if not df_o.empty:
+            for _, row in df_o.iterrows():
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([3, 2, 1])
+                    c1.write(f"👤 **{row['customer_name']}** - 📞 {row['customer_phone']}")
+                    c2.write(f"💰 {int(row['total_amount']):,} đ")
+                    if c3.button("🗑️ Xóa", key=f"del_{row['id']}"):
+                        with conn.session as s:
+                            s.execute(text("DELETE FROM orders WHERE id=:id"), {"id": row['id']})
+                            s.commit()
+                        st.rerun()
+                    with st.expander("Xem chi tiết"): st.text(row['order_items'])
