@@ -49,7 +49,7 @@ try:
         s.commit()
 except: pass
 
-# --- KIỂM TRA FONT & LOGO (Chống lỗi sập Web) ---
+# --- KIỂM TRA FONT & LOGO ---
 FONT_FILES = ["arial.ttf", "Arial.ttf", "ARIAL.TTF"]
 available_font = None
 for f in FONT_FILES:
@@ -74,7 +74,6 @@ def convert_drive_link(raw_url):
 def load_font_to_pdf(pdf):
     if available_font:
         try:
-            # Gắn chung 1 file cho cả chữ thường và chữ In Đậm để chống lỗi sập
             pdf.add_font("ArialVN", style="", fname=available_font, uni=True)
             pdf.add_font("ArialVN", style="B", fname=available_font, uni=True)
         except:
@@ -89,17 +88,18 @@ def get_font_name():
 class WanchiPDF(FPDF):
     def header_wanchi(self):
         font_name = get_font_name()
+        
         # 1. Chèn Logo
         if available_logo:
             self.image(available_logo, x=10, y=8, h=15)
         else:
-            self.set_font(font_name, "B", 16)
+            self.set_font(font_name, "B", 18)
             self.cell(100, 10, "WANCHI", border=0, align='L')
         
         # 2. Thông tin bên phải
         self.set_font(font_name, "B", 10)
-        self.set_xy(140, 8)
-        self.multi_cell(60, 5, txt=f"BẢNG BÁO GIÁ\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
+        self.set_xy(130, 8)
+        self.multi_cell(70, 5, txt=f"BẢNG BÁO GIÁ CÔNG TY\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
         self.ln(10)
 
 # --- XUẤT PDF CHO ĐẠI LÝ ---
@@ -111,8 +111,8 @@ def export_pdf_agency(df):
     load_font_to_pdf(pdf)
     font_name = get_font_name()
         
-    pdf.set_font(font_name, "B", 14)
-    pdf.cell(200, 10, txt="BẢNG GIÁ ĐẠI LÝ WANCHI", ln=True, align='C')
+    pdf.set_font(font_name, "B", 16)
+    pdf.cell(200, 10, txt="BẢNG BÁO GIÁ ĐẠI LÝ", ln=True, align='C')
     pdf.ln(5)
     
     pdf.set_font(font_name, "B", 10)
@@ -146,11 +146,12 @@ def export_pdf_company_pro(df):
     pdf.header_wanchi()
     
     # Header Bảng
-    pdf.set_fill_color(230, 230, 230) # Màu xám tro chuẩn PDF Wanchi
+    pdf.set_fill_color(230, 230, 230)
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font(font_name, "", 11)
+    pdf.set_font(font_name, "", 10)
     
-    widths = [40, 30, 55, 30, 25, 15]
+    # Tổng độ rộng = 190 (Vừa khít khổ A4)
+    widths = [40, 30, 50, 35, 20, 15]
     headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
     
     for i, head in enumerate(headers):
@@ -158,18 +159,18 @@ def export_pdf_company_pro(df):
     pdf.ln()
     
     # Nội dung Bảng
-    pdf.set_font(font_name, "", 10)
-    row_h = 35 # Chiều cao chuẩn
+    pdf.set_font(font_name, "", 9)
+    row_h = 35 
     
     for _, row in df.iterrows():
         if pdf.get_y() + row_h > 270:
             pdf.add_page()
             pdf.set_fill_color(230, 230, 230)
-            pdf.set_font(font_name, "", 11)
+            pdf.set_font(font_name, "", 10)
             for i, head in enumerate(headers):
                 pdf.cell(widths[i], 12, txt=head, border=1, fill=True, align='C')
             pdf.ln()
-            pdf.set_font(font_name, "", 10)
+            pdf.set_font(font_name, "", 9)
 
         x = pdf.get_x()
         y = pdf.get_y()
@@ -179,12 +180,15 @@ def export_pdf_company_pro(df):
         img_url = row.get('image_data', '')
         if img_url and str(img_url).strip() != "":
             try:
-                res = requests.get(img_url, timeout=5)
-                if res.status_code == 200:
+                # Thêm headers để vượt qua tường lửa tải ảnh
+                req_headers = {'User-Agent': 'Mozilla/5.0'}
+                res = requests.get(img_url, headers=req_headers, timeout=5)
+                if res.status_code == 200 and 'image' in res.headers.get('Content-Type', ''):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                         tmp.write(res.content)
-                        pdf.image(tmp.name, x=x+2, y=y+2, w=widths[0]-4, h=row_h-4)
-                    os.remove(tmp.name)
+                        tmp_path = tmp.name
+                    pdf.image(tmp_path, x=x+2, y=y+2, w=widths[0]-4, h=row_h-4)
+                    os.remove(tmp_path)
             except: pass
 
         # 2. Mã SP
@@ -199,11 +203,11 @@ def export_pdf_company_pro(df):
         pdf.set_xy(curr_x + 2, y + 10)
         pdf.multi_cell(widths[2]-4, 5, txt=str(row.get('name', '')), border=0, align='C')
 
-        # 4. Kích thước (Tự động tách xuống dòng chữ X như bản gốc Wanchi)
+        # 4. Kích thước (Nằm ngang chuẩn)
         curr_x += widths[2]
         pdf.rect(curr_x, y, widths[3], row_h)
-        pdf.set_xy(curr_x + 2, y + 3)
-        size_clean = str(row.get('size', '')).replace(" ", "").replace("x", "\nx\n").replace("X", "\nx\n").replace("(", "\n(")
+        pdf.set_xy(curr_x + 2, y + 12)
+        size_clean = str(row.get('size', '')).strip()
         pdf.multi_cell(widths[3]-4, 5, txt=size_clean, border=0, align='C')
 
         # 5. Đơn giá
@@ -304,7 +308,7 @@ else:
                         st.session_state.ready_pdf = pdf_bytes
                 
                 if 'ready_pdf' in st.session_state:
-                    st.download_button("📥 TẢI FILE BÁO GIÁ", data=st.session_state.ready_pdf, file_name=f"Bao_Gia_Wanchi_{datetime.now().strftime('%d%m%y')}.pdf", mime="application/pdf")
+                    st.download_button("📥 TẢI FILE BÁO GIÁ", data=st.session_state.ready_pdf, file_name=f"Bao_Gia_Cong_Ty_Wanchi_{datetime.now().strftime('%d%m%y')}.pdf", mime="application/pdf")
 
     with tab4:
         st.subheader("Lịch sử Đơn hàng")
