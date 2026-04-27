@@ -9,6 +9,39 @@ from datetime import datetime
 st.set_page_config(page_title="Wanchi Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
+# ==========================================
+# KHỐI TỰ ĐỘNG SỬA LỖI DATABASE (AUTO-FIX)
+# ==========================================
+try:
+    with conn.session as s:
+        # Tự động tạo bảng nếu lỡ bị xóa
+        s.execute(text("""
+            CREATE TABLE IF NOT EXISTS agency_products (
+                id SERIAL PRIMARY KEY,
+                product_code TEXT UNIQUE,
+                name TEXT,
+                size TEXT,
+                price_agency NUMERIC
+            );
+        """))
+        s.execute(text("""
+            CREATE TABLE IF NOT EXISTS company_products (
+                id SERIAL PRIMARY KEY,
+                product_code TEXT UNIQUE,
+                name TEXT,
+                size TEXT,
+                price_agency NUMERIC,
+                price_company NUMERIC,
+                image_data TEXT
+            );
+        """))
+        # Tự động chèn cột "Lốc" (unit_per_pack) để không bị lỗi đỏ như hình ảnh
+        s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
+        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
+        s.commit()
+except Exception as e:
+    pass
+
 # --- HÀM HỖ TRỢ ---
 def convert_drive_link(raw_url):
     if not raw_url: return ""
@@ -32,7 +65,7 @@ def export_pdf(df, title_pdf):
     pdf.set_font("Arial", size=10)
     pdf.set_fill_color(230, 230, 230)
     cols = df.columns.tolist()
-    widths = [35, 60, 40, 30, 25] # Độ rộng các cột
+    widths = [35, 60, 40, 30, 25] # Căn chỉnh độ rộng từng cột
     
     for i, col in enumerate(cols):
         pdf.cell(widths[i] if i < len(widths) else 30, 10, txt=str(col), border=1, fill=True, align='C')
@@ -68,7 +101,9 @@ else:
         "📜 Đơn hàng"
     ])
 
-    # 1. THÊM SẢN PHẨM ĐẠI LÝ (Đã bỏ Mô tả và Link ảnh)
+    # ==========================================
+    # 1. THÊM SẢN PHẨM ĐẠI LÝ
+    # ==========================================
     with tab1:
         st.subheader("Nhập sản phẩm Đại lý mới")
         with st.form("agency_form", clear_on_submit=True):
@@ -81,80 +116,102 @@ else:
             
             if st.form_submit_button("Lưu vào kho Đại lý"):
                 with conn.session as s:
+                    # Dùng ON CONFLICT để cập nhật nếu lỡ nhập trùng mã, không bị mất dữ liệu
                     s.execute(text("""
                         INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) 
                         VALUES (:c, :n, :s, :p, :pk)
+                        ON CONFLICT (product_code) DO UPDATE SET name=:n, size=:s, price_agency=:p, unit_per_pack=:pk
                     """), {"c": a_code, "n": a_name, "s": a_size, "p": a_price, "pk": a_pack})
                     s.commit()
-                st.success(f"✅ Đã thêm SP Đại lý: {a_name}")
+                st.success(f"✅ Đã thêm/cập nhật SP Đại lý: {a_name}")
 
-    # 2. DANH SÁCH SP ĐẠI LÝ (Có hiển thị Lốc)
+    # ==========================================
+    # 2. DANH SÁCH SP ĐẠI LÝ
+    # ==========================================
     with tab2:
         st.subheader("Bảng giá Đại lý")
-        df_a = conn.query("SELECT product_code as \"Mã\", name as \"Tên\", size as \"Kích thước\", price_agency as \"Giá ĐL\", unit_per_pack as \"Lốc\" FROM agency_products ORDER BY id DESC", ttl=0)
-        if not df_a.empty:
-            st.dataframe(df_a, use_container_width=True)
-            if st.button("📄 Xuất file PDF Đại lý"):
-                pdf_data = export_pdf(df_a, "BANG GIA DAI LY WANCHI")
-                st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Dai_Ly_Wanchi.pdf")
-        else: st.info("Kho Đại lý hiện đang trống.")
+        try:
+            df_a = conn.query("SELECT product_code as \"Mã\", name as \"Tên\", size as \"Kích thước\", price_agency as \"Giá ĐL\", unit_per_pack as \"Lốc\" FROM agency_products ORDER BY id DESC", ttl=0)
+            if not df_a.empty:
+                st.dataframe(df_a, use_container_width=True)
+                if st.button("📄 Xuất file PDF Đại lý"):
+                    pdf_data = export_pdf(df_a, "BANG GIA DAI LY WANCHI")
+                    st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Dai_Ly_Wanchi.pdf")
+            else: st.info("Kho Đại lý hiện đang trống.")
+        except Exception as e:
+            st.error("Đang đồng bộ cấu trúc mới, vui lòng tải lại trang (F5) để hiển thị danh sách.")
 
-    # 3. THÊM SẢN PHẨM CÔNG TY (Tự tính giá và chèn ảnh thiết kế)
+    # ==========================================
+    # 3. THÊM SẢN PHẨM CÔNG TY
+    # ==========================================
     with tab3:
         st.subheader("Nâng cấp sản phẩm lên dòng Công ty")
-        df_a_select = conn.query("SELECT * FROM agency_products", ttl=0)
-        if not df_a_select.empty:
-            list_a = {row['id']: f"[{row['product_code']}] {row['name']}" for _, row in df_a_select.iterrows()}
-            sel_id = st.selectbox("Chọn từ danh sách Đại lý:", options=list(list_a.keys()), format_func=lambda x: list_a[x])
-            
-            target = df_a_select[df_a_select['id'] == sel_id].iloc[0]
-            price_co = round(float(target['price_agency']) / 0.55, 0)
-            
-            with st.form("company_form"):
-                st.info(f"Đang xử lý: {target['name']} ({target['product_code']})")
-                st.write(f"💵 Đơn giá Đại lý: {int(target['price_agency']):,} đ")
-                st.write(f"🏷️ **Đơn giá Công ty (Gốc ĐL / 0.55): {int(price_co):,} đ**")
+        try:
+            df_a_select = conn.query("SELECT * FROM agency_products", ttl=0)
+            if not df_a_select.empty:
+                list_a = {row['id']: f"[{row['product_code']}] {row['name']}" for _, row in df_a_select.iterrows()}
+                sel_id = st.selectbox("Chọn từ danh sách Đại lý:", options=list(list_a.keys()), format_func=lambda x: list_a[x])
                 
-                raw_img = st.text_input("🔗 Chèn link ảnh thiết kế (Google Drive)")
+                target = df_a_select[df_a_select['id'] == sel_id].iloc[0]
+                price_co = round(float(target['price_agency']) / 0.55, 0)
                 
-                if st.form_submit_button("Xác nhận chuyển sang kho Công ty"):
-                    img_final = convert_drive_link(raw_img)
-                    with conn.session as s:
-                        s.execute(text("""
-                            INSERT INTO company_products (product_code, name, size, price_agency, price_company, image_data)
-                            VALUES (:c, :n, :s, :pa, :pc, :i)
-                            ON CONFLICT (product_code) DO UPDATE SET price_company = :pc, image_data = :i
-                        """), {"c": target['product_code'], "n": target['name'], "s": target['size'], 
-                               "pa": target['price_agency'], "pc": price_co, "i": img_final})
-                        s.commit()
-                    st.success("✅ Đã cập nhật sản phẩm vào kho Công ty!")
-        else: st.warning("Vui lòng nhập sản phẩm Đại lý trước.")
+                with st.form("company_form"):
+                    st.info(f"Đang xử lý: {target['name']} ({target['product_code']})")
+                    st.write(f"💵 Đơn giá Đại lý: {int(target['price_agency']):,} đ")
+                    st.write(f"🏷️ **Đơn giá Công ty (Gốc ĐL / 0.55): {int(price_co):,} đ**")
+                    
+                    raw_img = st.text_input("🔗 Chèn link ảnh thiết kế (Google Drive)")
+                    
+                    if st.form_submit_button("Xác nhận chuyển sang kho Công ty"):
+                        img_final = convert_drive_link(raw_img)
+                        with conn.session as s:
+                            s.execute(text("""
+                                INSERT INTO company_products (product_code, name, size, price_agency, price_company, image_data)
+                                VALUES (:c, :n, :s, :pa, :pc, :i)
+                                ON CONFLICT (product_code) DO UPDATE SET price_company = :pc, image_data = :i
+                            """), {"c": target['product_code'], "n": target['name'], "s": target['size'], 
+                                   "pa": target['price_agency'], "pc": price_co, "i": img_final})
+                            s.commit()
+                        st.success("✅ Đã cập nhật sản phẩm vào kho Công ty!")
+            else: st.warning("Vui lòng nhập sản phẩm Đại lý trước.")
+        except:
+            st.warning("Đang chờ dữ liệu đồng bộ.")
 
-    # 4. DANH SÁCH SẢN PHẨM CÔNG TY (Chỉ hiển thị đơn giá 1 SP)
+    # ==========================================
+    # 4. DANH SÁCH SẢN PHẨM CÔNG TY
+    # ==========================================
     with tab4:
         st.subheader("Bảng giá Công ty (Bán lẻ)")
-        df_c = conn.query("SELECT product_code as \"Mã\", name as \"Tên\", size as \"Kích thước\", price_company as \"Đơn giá 1 SP\" FROM company_products ORDER BY id DESC", ttl=0)
-        if not df_c.empty:
-            st.dataframe(df_c, use_container_width=True)
-            if st.button("📄 Xuất file PDF Công ty"):
-                pdf_data = export_pdf(df_c, "BANG GIA CONG TY WANCHI")
-                st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Cong_Ty_Wanchi.pdf")
-        else: st.info("Kho Công ty hiện đang trống.")
+        try:
+            df_c = conn.query("SELECT product_code as \"Mã\", name as \"Tên\", size as \"Kích thước\", price_company as \"Đơn giá 1 SP\" FROM company_products ORDER BY id DESC", ttl=0)
+            if not df_c.empty:
+                st.dataframe(df_c, use_container_width=True)
+                if st.button("📄 Xuất file PDF Công ty"):
+                    pdf_data = export_pdf(df_c, "BANG GIA CONG TY WANCHI")
+                    st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Cong_Ty_Wanchi.pdf")
+            else: st.info("Kho Công ty hiện đang trống.")
+        except:
+            pass
 
+    # ==========================================
     # 5. LƯU TRỮ ĐƠN HÀNG
+    # ==========================================
     with tab5:
         st.subheader("Lịch sử chốt đơn")
-        df_o = conn.query("SELECT * FROM orders ORDER BY order_date DESC", ttl=0)
-        if not df_o.empty:
-            for _, row in df_o.iterrows():
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns([3, 2, 1])
-                    c1.write(f"👤 **{row['customer_name']}** - 📞 {row['customer_phone']}")
-                    c2.write(f"💰 {int(row['total_amount']):,} đ")
-                    if c3.button("🗑️ Xóa", key=f"del_{row['id']}"):
-                        with conn.session as s:
-                            s.execute(text("DELETE FROM orders WHERE id=:id"), {"id": row['id']})
-                            s.commit()
-                        st.rerun()
-                    with st.expander("Xem chi tiết"):
-                        st.text(row['order_items'])
+        try:
+            df_o = conn.query("SELECT * FROM orders ORDER BY order_date DESC", ttl=0)
+            if not df_o.empty:
+                for _, row in df_o.iterrows():
+                    with st.container(border=True):
+                        c1, c2, c3 = st.columns([3, 2, 1])
+                        c1.write(f"👤 **{row['customer_name']}** - 📞 {row['customer_phone']}")
+                        c2.write(f"💰 {int(row['total_amount']):,} đ")
+                        if c3.button("🗑️ Xóa", key=f"del_{row['id']}"):
+                            with conn.session as s:
+                                s.execute(text("DELETE FROM orders WHERE id=:id"), {"id": row['id']})
+                                s.commit()
+                            st.rerun()
+                        with st.expander("Xem chi tiết"):
+                            st.text(row['order_items'])
+        except:
+            pass
