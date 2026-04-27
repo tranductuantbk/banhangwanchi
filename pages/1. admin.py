@@ -8,9 +8,21 @@ from datetime import datetime
 import requests
 import tempfile
 import os
+import urllib.request
 
 st.set_page_config(page_title="Wanchi Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
+
+# ==========================================
+# KHỐI TỰ ĐỘNG TẢI FONT TIẾNG VIỆT
+# ==========================================
+FONT_PATH = "arial.ttf"
+if not os.path.exists(FONT_PATH):
+    try:
+        # Tự động tải file arial.ttf từ Github về nếu máy chủ chưa có
+        urllib.request.urlretrieve("https://raw.githubusercontent.com/matomo-org/travis-scripts/master/fonts/Arial.ttf", FONT_PATH)
+    except Exception as e:
+        pass
 
 # ==========================================
 # KHỐI TỰ ĐỘNG SỬA LỖI DATABASE
@@ -52,22 +64,32 @@ try:
 except Exception as e:
     pass
 
-# --- HÀM HỖ TRỢ CHUYỂN LINK ---
+# --- HÀM HỖ TRỢ ---
 def convert_drive_link(raw_url):
     if not raw_url: return ""
     match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_url)
     if match: return f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
     return raw_url
 
-# --- XUẤT PDF CHO ĐẠI LÝ (KHÔNG CÓ HÌNH) ---
+def load_custom_font(pdf, size):
+    try:
+        # Cố gắng load font Arial hỗ trợ tiếng Việt
+        pdf.add_font("Arial", style="", fname=FONT_PATH, uni=True)
+        pdf.set_font("Arial", size=size)
+    except Exception:
+        try:
+            # Dành cho thư viện fpdf2 bản mới không cần uni=True
+            pdf.add_font("Arial", style="", fname=FONT_PATH)
+            pdf.set_font("Arial", size=size)
+        except:
+            # Nếu tải font vẫn thất bại thì dùng Helvetica tạm
+            pdf.set_font("Helvetica", size=size)
+
+# --- XUẤT PDF CHO ĐẠI LÝ ---
 def export_pdf(df, title_pdf):
     pdf = FPDF()
     pdf.add_page()
-    try:
-        pdf.add_font("Arial", style="", fname="arial.ttf")
-        pdf.set_font("Arial", size=12)
-    except:
-        pdf.set_font("Helvetica", size=12)
+    load_custom_font(pdf, 12)
         
     pdf.cell(200, 10, txt=title_pdf, ln=True, align='C')
     pdf.ln(10)
@@ -89,15 +111,11 @@ def export_pdf(df, title_pdf):
         pdf.ln()
     return bytes(pdf.output())
 
-# --- XUẤT PDF CÔNG TY (CÓ HÌNH ẢNH GIỐNG BẢN THIẾT KẾ CỦA WANCHI) ---
+# --- XUẤT PDF CÔNG TY (CÓ HÌNH ẢNH) ---
 def export_pdf_company_with_images(df):
     pdf = FPDF()
     pdf.add_page()
-    try:
-        pdf.add_font("Arial", style="", fname="arial.ttf")
-        pdf.set_font("Arial", size=18)
-    except:
-        pdf.set_font("Helvetica", size=18)
+    load_custom_font(pdf, 18)
         
     # Tiêu đề và Tháng
     pdf.cell(100, 10, txt="WANCHI", ln=0, align='L')
@@ -176,7 +194,6 @@ def export_pdf_company_with_images(df):
         pdf.set_xy(x_start, y_start + row_height)
 
     return bytes(pdf.output())
-
 
 if 'is_admin' not in st.session_state:
     st.session_state.is_admin = False
@@ -289,7 +306,7 @@ else:
                 st.write("---")
                 st.write("**Xuất báo giá PDF chuyên nghiệp (kèm Hình Ảnh):**")
                 
-                # Nút Tạo PDF (Vì tải ảnh cần thời gian nên phải tạo trước khi tải)
+                # Nút Tạo PDF
                 if st.button("🔄 Bấm vào đây để đóng gói file PDF"):
                     with st.spinner("⏳ Hệ thống đang lấy ảnh từ Google Drive để vẽ vào PDF. Có thể mất vài chục giây, vui lòng không tắt trang..."):
                         pdf_data_c = export_pdf_company_with_images(df_c)
