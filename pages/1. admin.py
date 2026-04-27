@@ -5,16 +5,18 @@ from fpdf import FPDF
 import re
 import base64
 from datetime import datetime
+import requests
+import tempfile
+import os
 
 st.set_page_config(page_title="Wanchi Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 # ==========================================
-# KHỐI TỰ ĐỘNG SỬA LỖI DATABASE (AUTO-FIX BẢN MẠNH NHẤT)
+# KHỐI TỰ ĐỘNG SỬA LỖI DATABASE
 # ==========================================
 try:
     with conn.session as s:
-        # 1. Tạo bảng nếu chưa có
         s.execute(text("""
             CREATE TABLE IF NOT EXISTS agency_products (
                 id SERIAL PRIMARY KEY,
@@ -35,33 +37,29 @@ try:
                 image_data TEXT
             );
         """))
-        
-        # 2. Tự động chèn cột nếu bị thiếu trong quá trình sử dụng
         s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS price_agency NUMERIC;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS price_company NUMERIC;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS image_data TEXT;"))
-
-        # 3. Ép điều kiện chống trùng lặp (UNIQUE) để lệnh ON CONFLICT hoạt động
         try:
             s.execute(text("ALTER TABLE agency_products ADD UNIQUE (product_code);"))
         except: pass
         try:
             s.execute(text("ALTER TABLE company_products ADD UNIQUE (product_code);"))
         except: pass
-
         s.commit()
 except Exception as e:
     pass
 
-# --- HÀM HỖ TRỢ ---
+# --- HÀM HỖ TRỢ CHUYỂN LINK ---
 def convert_drive_link(raw_url):
     if not raw_url: return ""
     match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_url)
     if match: return f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000"
     return raw_url
 
+# --- XUẤT PDF CHO ĐẠI LÝ (KHÔNG CÓ HÌNH) ---
 def export_pdf(df, title_pdf):
     pdf = FPDF()
     pdf.add_page()
@@ -74,7 +72,7 @@ def export_pdf(df, title_pdf):
     pdf.cell(200, 10, txt=title_pdf, ln=True, align='C')
     pdf.ln(10)
     
-    pdf.set_font("Arial", size=10)
+    pdf.set_font("Arial", size=10) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=10)
     pdf.set_fill_color(230, 230, 230)
     cols = df.columns.tolist()
     widths = [35, 60, 40, 30, 25]
@@ -83,13 +81,102 @@ def export_pdf(df, title_pdf):
         pdf.cell(widths[i] if i < len(widths) else 30, 10, txt=str(col), border=1, fill=True, align='C')
     pdf.ln()
     
-    pdf.set_font("Arial", size=9)
+    pdf.set_font("Arial", size=9) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=9)
     for _, row in df.iterrows():
         for i, item in enumerate(row):
             val = f"{int(item):,}" if isinstance(item, (int, float)) and i >= 3 else str(item)
             pdf.cell(widths[i] if i < len(widths) else 30, 10, txt=val, border=1, align='L')
         pdf.ln()
     return bytes(pdf.output())
+
+# --- XUẤT PDF CÔNG TY (CÓ HÌNH ẢNH GIỐNG BẢN THIẾT KẾ CỦA WANCHI) ---
+def export_pdf_company_with_images(df):
+    pdf = FPDF()
+    pdf.add_page()
+    try:
+        pdf.add_font("Arial", style="", fname="arial.ttf")
+        pdf.set_font("Arial", size=18)
+    except:
+        pdf.set_font("Helvetica", size=18)
+        
+    # Tiêu đề và Tháng
+    pdf.cell(100, 10, txt="WANCHI", ln=0, align='L')
+    pdf.set_font("Arial", size=10) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=10)
+    pdf.cell(90, 10, txt=datetime.now().strftime("%m/%Y"), ln=1, align='R')
+    pdf.ln(5)
+    
+    # Cột Tiêu đề
+    pdf.set_fill_color(230, 230, 230)
+    headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
+    widths = [35, 30, 50, 40, 20, 15]
+    
+    for i, col in enumerate(headers):
+        pdf.cell(widths[i], 10, txt=str(col), border=1, fill=True, align='C')
+    pdf.ln()
+    
+    # Vẽ Nội dung và Hình ảnh
+    pdf.set_font("Arial", size=9) if 'Arial' in pdf.fonts else pdf.set_font("Helvetica", size=9)
+    row_height = 25 # Chiều cao của 1 sản phẩm để chứa vừa ảnh
+    
+    for _, row in df.iterrows():
+        # Qua trang nếu hết chỗ
+        if pdf.get_y() + row_height > 280:
+            pdf.add_page()
+            for i, col in enumerate(headers):
+                pdf.cell(widths[i], 10, txt=str(col), border=1, fill=True, align='C')
+            pdf.ln()
+            
+        x_start = pdf.get_x()
+        y_start = pdf.get_y()
+        
+        # 1. Hình ảnh (Tải từ Drive)
+        pdf.rect(x_start, y_start, widths[0], row_height)
+        img_url = row.get('image_data', '')
+        if pd.notna(img_url) and str(img_url).strip() != "":
+            try:
+                response = requests.get(str(img_url).strip(), timeout=3)
+                if response.status_code == 200:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                        tmp.write(response.content)
+                        tmp_path = tmp.name
+                    # Canh giữa hình vào ô
+                    pdf.image(tmp_path, x=x_start + 2, y=y_start + 2, w=widths[0] - 4, h=row_height - 4)
+                    os.remove(tmp_path)
+            except: pass
+        
+        # 2. Mã SP
+        pdf.rect(x_start + widths[0], y_start, widths[1], row_height)
+        pdf.set_xy(x_start + widths[0], y_start + 10)
+        pdf.cell(widths[1], 5, txt=str(row.get('product_code', '')), border=0, align='C')
+        
+        # 3. Diễn giải (Name)
+        pdf.rect(x_start + sum(widths[:2]), y_start, widths[2], row_height)
+        pdf.set_xy(x_start + sum(widths[:2]), y_start + 5)
+        pdf.multi_cell(widths[2], 5, txt=str(row.get('name', '')), border=0, align='C')
+        
+        # 4. Kích thước
+        pdf.rect(x_start + sum(widths[:3]), y_start, widths[3], row_height)
+        pdf.set_xy(x_start + sum(widths[:3]), y_start + 5)
+        size_txt = str(row.get('size', '')).replace(" ", "\n")
+        pdf.multi_cell(widths[3], 5, txt=size_txt, border=0, align='C')
+        
+        # 5. Đơn giá
+        pdf.rect(x_start + sum(widths[:4]), y_start, widths[4], row_height)
+        pdf.set_xy(x_start + sum(widths[:4]), y_start + 10)
+        price = row.get('price_company', 0)
+        price_str = f"{int(price):,}".replace(",", ".") if pd.notna(price) else "0"
+        pdf.cell(widths[4], 5, txt=price_str, border=0, align='C')
+        
+        # 6. Lốc
+        pdf.rect(x_start + sum(widths[:5]), y_start, widths[5], row_height)
+        pdf.set_xy(x_start + sum(widths[:5]), y_start + 10)
+        pdf.cell(widths[5], 5, txt="1 cái", border=0, align='C')
+        
+        # Chuyển con trỏ xuống dòng tiếp theo
+        pdf.set_xy(x_start, y_start + row_height)
+
+    return bytes(pdf.output())
+
 
 if 'is_admin' not in st.session_state:
     st.session_state.is_admin = False
@@ -112,9 +199,7 @@ else:
         "📜 Đơn hàng"
     ])
 
-    # ==========================================
     # 1. THÊM SẢN PHẨM ĐẠI LÝ
-    # ==========================================
     with tab1:
         st.subheader("Nhập sản phẩm Đại lý mới")
         with st.form("agency_form", clear_on_submit=True):
@@ -128,42 +213,32 @@ else:
             if st.form_submit_button("Lưu vào kho Đại lý"):
                 try:
                     with conn.session as s:
-                        # Ép kiểu dữ liệu tiêu chuẩn
                         s.execute(text("""
                             INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) 
                             VALUES (:c, :n, :s, :p, :pk)
                             ON CONFLICT (product_code) DO UPDATE SET name=:n, size=:s, price_agency=:p, unit_per_pack=:pk
                         """), {
-                            "c": str(a_code), 
-                            "n": str(a_name), 
-                            "s": str(a_size), 
-                            "p": float(a_price), 
-                            "pk": int(a_pack)
+                            "c": str(a_code), "n": str(a_name), "s": str(a_size), 
+                            "p": float(a_price), "pk": int(a_pack)
                         })
                         s.commit()
                     st.success(f"✅ Đã thêm/cập nhật SP Đại lý: {a_name}")
-                except Exception as e:
-                    st.error(f"❌ Lỗi khi lưu dữ liệu Đại lý: {e}")
+                except Exception as e: st.error(f"❌ Lỗi khi lưu: {e}")
 
-    # ==========================================
     # 2. DANH SÁCH SP ĐẠI LÝ
-    # ==========================================
     with tab2:
         st.subheader("Bảng giá Đại lý")
         try:
             df_a = conn.query("SELECT product_code as \"Mã\", name as \"Tên\", size as \"Kích thước\", price_agency as \"Giá ĐL\", unit_per_pack as \"Lốc\" FROM agency_products ORDER BY id DESC", ttl=0)
             if not df_a.empty:
                 st.dataframe(df_a, use_container_width=True)
-                if st.button("📄 Xuất file PDF Đại lý"):
-                    pdf_data = export_pdf(df_a, "BANG GIA DAI LY WANCHI")
-                    st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Dai_Ly_Wanchi.pdf")
+                # Lưu file nhanh (Không ảnh)
+                pdf_data_a = export_pdf(df_a, "BANG GIA DAI LY WANCHI")
+                st.download_button("📥 Tải file PDF Đại lý", data=pdf_data_a, file_name="Gia_Dai_Ly_Wanchi.pdf")
             else: st.info("Kho Đại lý hiện đang trống.")
-        except Exception as e:
-            st.error(f"❌ Không thể tải danh sách Đại lý. Lỗi: {e}")
+        except: pass
 
-    # ==========================================
     # 3. THÊM SẢN PHẨM CÔNG TY
-    # ==========================================
     with tab3:
         st.subheader("Nâng cấp sản phẩm lên dòng Công ty")
         try:
@@ -186,46 +261,49 @@ else:
                         try:
                             img_final = convert_drive_link(raw_img)
                             with conn.session as s:
-                                # Ép tất cả biến thành kiểu mặc định của Python để tránh lỗi np.float64
                                 s.execute(text("""
                                     INSERT INTO company_products (product_code, name, size, price_agency, price_company, image_data)
                                     VALUES (:c, :n, :s, :pa, :pc, :i)
                                     ON CONFLICT (product_code) DO UPDATE SET price_company = :pc, image_data = :i
                                 """), {
-                                    "c": str(target['product_code']), 
-                                    "n": str(target['name']), 
+                                    "c": str(target['product_code']), "n": str(target['name']), 
                                     "s": str(target['size']) if pd.notna(target['size']) else "", 
-                                    "pa": float(target['price_agency']), 
-                                    "pc": float(price_co), 
-                                    "i": str(img_final)
+                                    "pa": float(target['price_agency']), "pc": float(price_co), "i": str(img_final)
                                 })
                                 s.commit()
                             st.success("✅ Đã cập nhật sản phẩm vào kho Công ty!")
-                        except Exception as e:
-                            st.error(f"❌ Lỗi ghi vào kho Công ty: {e}")
+                        except Exception as e: st.error(f"❌ Lỗi ghi vào kho Công ty: {e}")
             else: st.warning("Vui lòng nhập sản phẩm Đại lý trước.")
-        except Exception as e:
-            st.error(f"❌ Lỗi lấy dữ liệu: {e}")
+        except: pass
 
-    # ==========================================
-    # 4. DANH SÁCH SẢN PHẨM CÔNG TY
-    # ==========================================
+    # 4. DANH SÁCH SẢN PHẨM CÔNG TY (CÓ TÍNH NĂNG XUẤT ẢNH)
     with tab4:
         st.subheader("Bảng giá Công ty (Bán lẻ)")
         try:
-            df_c = conn.query("SELECT product_code as \"Mã\", name as \"Tên\", size as \"Kích thước\", price_company as \"Đơn giá 1 SP\" FROM company_products ORDER BY id DESC", ttl=0)
+            df_c = conn.query("SELECT product_code, name, size, price_company, image_data FROM company_products ORDER BY id DESC", ttl=0)
             if not df_c.empty:
-                st.dataframe(df_c, use_container_width=True)
-                if st.button("📄 Xuất file PDF Công ty"):
-                    pdf_data = export_pdf(df_c, "BANG GIA CONG TY WANCHI")
-                    st.download_button("📥 Tải PDF về máy", data=pdf_data, file_name="Gia_Cong_Ty_Wanchi.pdf")
+                # Hiển thị trên Web (Giấu link ảnh đi cho gọn)
+                df_display = df_c.rename(columns={"product_code": "Mã", "name": "Tên", "size": "Kích thước", "price_company": "Đơn giá 1 SP"})
+                st.dataframe(df_display.drop(columns=["image_data"]), use_container_width=True)
+                
+                st.write("---")
+                st.write("**Xuất báo giá PDF chuyên nghiệp (kèm Hình Ảnh):**")
+                
+                # Nút Tạo PDF (Vì tải ảnh cần thời gian nên phải tạo trước khi tải)
+                if st.button("🔄 Bấm vào đây để đóng gói file PDF"):
+                    with st.spinner("⏳ Hệ thống đang lấy ảnh từ Google Drive để vẽ vào PDF. Có thể mất vài chục giây, vui lòng không tắt trang..."):
+                        pdf_data_c = export_pdf_company_with_images(df_c)
+                        st.session_state.pdf_company_data = pdf_data_c
+                        st.success("✅ Đã tạo xong! Vui lòng bấm nút 'Tải PDF về máy' vừa xuất hiện bên dưới.")
+                
+                # Nút tải hiện ra sau khi tạo xong
+                if 'pdf_company_data' in st.session_state:
+                    st.download_button("📥 TẢI PDF VỀ MÁY", data=st.session_state.pdf_company_data, file_name="Bao_Gia_Cong_Ty_Wanchi.pdf", mime="application/pdf")
+                    
             else: st.info("Kho Công ty hiện đang trống.")
-        except Exception as e:
-            st.error(f"❌ Không thể tải danh sách Công ty. Lỗi: {e}")
+        except Exception as e: st.error(f"Lỗi: {e}")
 
-    # ==========================================
     # 5. LƯU TRỮ ĐƠN HÀNG
-    # ==========================================
     with tab5:
         st.subheader("Lịch sử chốt đơn")
         try:
