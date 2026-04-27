@@ -50,7 +50,7 @@ try:
 except: pass
 
 # ==========================================
-# LỚP BẢO VỆ TÀI NGUYÊN (CHỐNG SẬP WEB)
+# LỚP BẢO VỆ TÀI NGUYÊN (FONT & LOGO)
 # ==========================================
 available_font = None
 for f in ["arial.ttf", "Arial.ttf", "ARIAL.TTF", "arial_dl.ttf"]:
@@ -107,6 +107,7 @@ class WanchiPDF(FPDF):
         self.multi_cell(70, 5, txt=f"BẢNG BÁO GIÁ {self.quote_type}\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
         self.ln(10)
 
+# --- XUẤT PDF CHUYÊN NGHIỆP TÙY BIẾN ---
 def export_pro_pdf(df, mode="AGENCY"):
     if not available_font: return None
     
@@ -118,23 +119,28 @@ def export_pro_pdf(df, mode="AGENCY"):
     pdf.set_fill_color(230, 230, 230)
     pdf.set_font(pdf.font_wanchi, "B", 10)
     
-    # Thiết lập cột tùy theo loại báo giá (Tổng độ rộng = 190)
+    # Thiết lập Cột & Chiều cao dòng tùy theo loại báo giá
     if mode == "COMPANY":
         widths = [40, 30, 50, 35, 20, 15]
         headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
+        row_h = 35   # Cao để chứa hình ảnh
+        y_off = 15   # Canh giữa chữ theo chiều dọc
     else:
-        # Đại lý không có cột Hình ảnh, các cột khác được mở rộng ra
-        widths = [40, 65, 45, 20, 20]
+        widths = [35, 70, 45, 20, 20]
         headers = ["Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
+        row_h = 12   # Gọn gàng như Excel
+        y_off = 3    # Canh giữa chữ cho dòng nhỏ
     
+    # Vẽ Header
     for i, head in enumerate(headers):
         pdf.cell(widths[i], 12, txt=head, border=1, fill=True, align='C')
     pdf.ln()
     
+    # Vẽ Nội dung
     pdf.set_font(pdf.font_wanchi, "", 9)
-    row_h = 35 
     
     for _, row in df.iterrows():
+        # Ngắt trang nếu hết giấy
         if pdf.get_y() + row_h > 270:
             pdf.add_page()
             pdf.set_fill_color(230, 230, 230)
@@ -162,33 +168,32 @@ def export_pro_pdf(df, mode="AGENCY"):
                         os.remove(tmp_path)
                 except: pass
             curr_x += widths[0]
-            
             w_ma, w_dg, w_kt, w_gia, w_loc = widths[1], widths[2], widths[3], widths[4], widths[5]
         else:
             w_ma, w_dg, w_kt, w_gia, w_loc = widths[0], widths[1], widths[2], widths[3], widths[4]
 
         # 2. Mã SP
         pdf.rect(curr_x, y, w_ma, row_h)
-        pdf.set_xy(curr_x, y + 15)
+        pdf.set_xy(curr_x, y + y_off)
         pdf.multi_cell(w_ma, 5, txt=str(row.get('product_code', '')), border=0, align='C')
         curr_x += w_ma
 
         # 3. Diễn giải
         pdf.rect(curr_x, y, w_dg, row_h)
-        pdf.set_xy(curr_x + 2, y + 10)
+        pdf.set_xy(curr_x + 2, y + (y_off - 1) if mode == "AGENCY" else y + y_off)
         pdf.multi_cell(w_dg-4, 5, txt=str(row.get('name', '')), border=0, align='C')
         curr_x += w_dg
 
         # 4. Kích thước
         pdf.rect(curr_x, y, w_kt, row_h)
-        pdf.set_xy(curr_x + 2, y + 12)
+        pdf.set_xy(curr_x + 2, y + y_off)
         size_clean = str(row.get('size', '')).strip()
         pdf.multi_cell(w_kt-4, 5, txt=size_clean, border=0, align='C')
         curr_x += w_kt
 
         # 5. Đơn giá
         pdf.rect(curr_x, y, w_gia, row_h)
-        pdf.set_xy(curr_x, y + 15)
+        pdf.set_xy(curr_x, y + y_off)
         price_val = row.get('price_agency' if mode == "AGENCY" else 'price_company', 0)
         price_str = f"{int(price_val):,}".replace(",", ".")
         pdf.cell(w_gia, 5, txt=price_str, border=0, align='C')
@@ -196,7 +201,7 @@ def export_pro_pdf(df, mode="AGENCY"):
 
         # 6. Lốc
         pdf.rect(curr_x, y, w_loc, row_h)
-        pdf.set_xy(curr_x, y + 15)
+        pdf.set_xy(curr_x, y + y_off)
         unit = f"{row['unit_per_pack']} cái" if mode == "AGENCY" else "1 cái"
         pdf.cell(w_loc, 5, txt=unit, border=0, align='C')
 
