@@ -12,7 +12,7 @@ st.set_page_config(page_title="Wanchi Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 # ==========================================
-# KHỐI TỰ ĐỘNG CẬP NHẬT DATABASE
+# KHỐI TỰ ĐỘNG SỬA LỖI DATABASE
 # ==========================================
 try:
     with conn.session as s:
@@ -41,9 +41,9 @@ available_logo = next((l for l in LOGO_FILES if os.path.exists(l)), None)
 # --- HÀM HỖ TRỢ ---
 def convert_drive_link(raw_url):
     if not raw_url: return ""
-    # Trích xuất ID từ mọi loại link Drive (view, file, id=...)
-    match = re.search(r"(?<=/d/)[a-zA-Z0-9_-]+|(?<=id=)[a-zA-Z0-9_-]+", raw_url)
-    return f"https://drive.google.com/thumbnail?id={match.group(0)}&sz=w1000" if match else raw_url
+    # Dùng API tải file trực tiếp (ổn định nhất để lấy ảnh Drive)
+    match = re.search(r"(?:/d/|id=)([a-zA-Z0-9_-]+)", str(raw_url))
+    return f"https://drive.google.com/uc?export=download&id={match.group(1)}" if match else raw_url
 
 def register_wanchi_font(pdf):
     if available_font:
@@ -70,26 +70,25 @@ class WanchiPDF(FPDF):
         self.multi_cell(70, 5, txt=f"BẢNG BÁO GIÁ {self.quote_type}\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
         self.ln(10)
 
+# --- THIẾT KẾ GRID MỚI TẠO ĐƯỜNG VIỀN KÍN MẠCH ---
 def export_pro_pdf(df, mode="AGENCY"):
     title = "ĐẠI LÝ" if mode == "AGENCY" else "CÔNG TY"
     pdf = WanchiPDF(quote_type=title)
     pdf.add_page()
     pdf.header_wanchi()
-    pdf.set_fill_color(245, 245, 245) # Màu xám nhạt hơn cho chuyên nghiệp
+    pdf.set_fill_color(220, 220, 220)
     pdf.set_font(pdf.font_wanchi, "B", 10)
     
-    # Thiết lập Cột & Chiều cao (Đã làm gọn cực đẹp)
     if mode == "COMPANY":
         widths = [35, 30, 55, 35, 20, 15]
         headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"]
-        row_h = 22 # Ép gọn từ 28 xuống 22
-        y_off = 8  # Canh giữa dọc cho dòng 22mm
+        row_h = 26 # Chiều cao 26 rất gọn và vừa vặn cho ảnh
     else:
         widths = [35, 70, 45, 20, 20]
         headers = ["Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"]
-        row_h = 10 # Gọn hơn nữa cho Đại lý
-        y_off = 2.5
+        row_h = 12
     
+    # In Header Table
     for i, head in enumerate(headers):
         pdf.cell(widths[i], 10, txt=head, border=1, fill=True, align='C')
     pdf.ln()
@@ -98,49 +97,66 @@ def export_pro_pdf(df, mode="AGENCY"):
     for _, row in df.iterrows():
         if pdf.get_y() + row_h > 275:
             pdf.add_page()
-            pdf.set_fill_color(245, 245, 245)
+            pdf.set_fill_color(220, 220, 220)
             pdf.set_font(pdf.font_wanchi, "B", 10)
-            for i, head in enumerate(headers): pdf.cell(widths[i], 10, txt=head, border=1, fill=True, align='C')
+            for i, head in enumerate(headers): 
+                pdf.cell(widths[i], 10, txt=head, border=1, fill=True, align='C')
             pdf.ln()
             pdf.set_font(pdf.font_wanchi, "", 9)
 
         x, y = pdf.get_x(), pdf.get_y()
-        curr_x = x
-
+        
+        # 1. BƯỚC QUAN TRỌNG: VẼ TOÀN BỘ KHUNG VIỀN ĐỨT ĐOẠN TRƯỚC ĐỂ LUÔN SẮC NÉT
+        cx = x
+        for w in widths:
+            pdf.rect(cx, y, w, row_h)
+            cx += w
+            
+        # 2. ĐIỀN NỘI DUNG VÀO Ô
+        cx = x
         if mode == "COMPANY":
-            pdf.rect(curr_x, y, widths[0], row_h)
             img_url = row.get('image_data', '')
             if img_url:
                 try:
-                    # Header Mozilla để vượt rào Drive
                     res = requests.get(img_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7)
-                    if res.status_code == 200:
+                    # Bỏ qua nếu là file HTML (Google bắt đăng nhập)
+                    if res.status_code == 200 and 'text/html' not in res.headers.get('Content-Type', ''):
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                             tmp.write(res.content)
-                            # Canh giữa ảnh trong ô
-                            pdf.image(tmp.name, x=curr_x+2, y=y+1, h=row_h-2)
-                        os.remove(tmp.name)
+                            tmp_path = tmp.name
+                        pdf.image(tmp_path, x=cx+1, y=y+1, w=widths[0]-2, h=row_h-2)
+                        os.remove(tmp_path)
                 except: pass
-            curr_x += widths[0]
+            cx += widths[0]
             w_list = widths[1:]
         else: w_list = widths
 
-        # Mã SP, Tên, KT
-        fields = ['product_code', 'name', 'size']
-        for i, f in enumerate(fields):
-            pdf.rect(curr_x, y, w_list[i], row_h)
-            # Căn chỉnh Diễn giải (name) cao hơn một chút nếu nhiều dòng
-            pdf.set_xy(curr_x, y + (y_off if f != 'name' else y_off - 2))
-            pdf.multi_cell(w_list[i], 4, txt=str(row.get(f, '')), border=0, align='C')
-            curr_x += w_list[i]
+        # Cột 1: Mã SP (Căn giữa)
+        pdf.set_xy(cx, y + (row_h/2 - 2.5))
+        pdf.multi_cell(w_list[0], 5, txt=str(row.get('product_code', '')), border=0, align='C')
+        cx += w_list[0]
 
-        # Đơn giá & Cái
-        price_val = row.get('price_agency' if mode == "AGENCY" else 'price_company', 0)
-        for i, val in enumerate([f"{int(price_val):,}".replace(",", "."), f"{row['unit_per_pack'] if mode == 'AGENCY' else 1} cái"]):
-            pdf.rect(curr_x, y, w_list[3+i], row_h)
-            pdf.set_xy(curr_x, y + y_off)
-            pdf.cell(w_list[3+i], 5, txt=val, border=0, align='C')
-            curr_x += w_list[3+i]
+        # Cột 2: Diễn giải (Sát viền trên để tự rớt dòng đẹp)
+        pdf.set_xy(cx + 1, y + 2)
+        pdf.multi_cell(w_list[1] - 2, 5, txt=str(row.get('name', '')), border=0, align='C')
+        cx += w_list[1]
+
+        # Cột 3: Kích thước
+        pdf.set_xy(cx + 1, y + 2)
+        pdf.multi_cell(w_list[2] - 2, 5, txt=str(row.get('size', '')), border=0, align='C')
+        cx += w_list[2]
+
+        # Cột 4: Đơn giá (Căn giữa dọc)
+        price_val = row.get('price_company') if mode == "COMPANY" else row.get('price_agency')
+        price_str = f"{int(price_val):,}".replace(",", ".") if pd.notna(price_val) else "0"
+        pdf.set_xy(cx, y + (row_h/2 - 2.5))
+        pdf.cell(w_list[3], 5, txt=price_str, border=0, align='C')
+        cx += w_list[3]
+
+        # Cột 5: CÁI
+        unit_str = "1 cái" if mode == "COMPANY" else f"{row.get('unit_per_pack', 100)} cái"
+        pdf.set_xy(cx, y + (row_h/2 - 2.5))
+        pdf.cell(w_list[4], 5, txt=unit_str, border=0, align='C')
 
         pdf.set_xy(x, y + row_h)
     return bytes(pdf.output())
@@ -177,7 +193,6 @@ else:
                 pdf = export_pro_pdf(df_a, mode="AGENCY")
                 st.download_button("📥 TẢI PDF", data=pdf, file_name="Bao_Gia_DaiLy.pdf")
             
-            # Nút xóa sản phẩm Đại lý
             st.divider()
             st.subheader("🗑️ Xóa sản phẩm Đại lý")
             del_opts_a = {row['product_code']: f"[{row['product_code']}] {row['name']}" for _, row in df_a.iterrows()}
@@ -198,7 +213,8 @@ else:
             price_co = round(float(target['price_agency']) / 0.55, 0)
             with st.form("co_form"):
                 st.write(f"Giá Công ty tự động: **{int(price_co):,} đ**")
-                raw_img = st.text_input("Link ảnh thiết kế (Google Drive):")
+                # Thêm lời nhắc nhở quyền Share cho Link Drive
+                raw_img = st.text_input("Link ảnh thiết kế (Chú ý: Nhớ bật quyền 'Bất kỳ ai có liên kết' trên Drive):")
                 if st.form_submit_button("Xác nhận"):
                     final_i = convert_drive_link(raw_img)
                     with conn.session as s:
@@ -207,16 +223,14 @@ else:
                     st.success("Đã cập nhật kho Công ty!")
 
     with tab3:
-        # Đã đổi tên thành "Danh sách SP Công ty"
         df_c = conn.query("SELECT * FROM company_products ORDER BY id DESC", ttl=0)
         if not df_c.empty:
             st.dataframe(df_c[['product_code', 'name', 'size', 'price_company']], use_container_width=True)
             if st.button("🚀 XUẤT PDF CÔNG TY"):
-                with st.spinner("Đang chèn ảnh và đóng gói PDF..."):
+                with st.spinner("Đang chèn ảnh và đóng gói PDF (Nếu không thấy ảnh, vui lòng kiểm tra lại quyền Share của link Google Drive)..."):
                     pdf_c = export_pro_pdf(df_c, mode="COMPANY")
                     st.download_button("📥 TẢI PDF BÁO GIÁ CÔNG TY", data=pdf_c, file_name="Bao_Gia_CongTy.pdf")
             
-            # Nút xóa sản phẩm Công ty
             st.divider()
             st.subheader("🗑️ Xóa sản phẩm Công ty")
             del_opts_c = {row['product_code']: f"[{row['product_code']}] {row['name']}" for _, row in df_c.iterrows()}
