@@ -58,7 +58,6 @@ for f in ["arial.ttf", "Arial.ttf", "ARIAL.TTF", "arial_dl.ttf"]:
         available_font = f
         break
 
-# Tự động tải font dự phòng nếu máy chủ bị thiếu
 if not available_font:
     try:
         r = requests.get("https://github.com/matomo-org/travis-scripts/raw/master/fonts/Arial.ttf", timeout=5)
@@ -97,14 +96,12 @@ class WanchiPDF(FPDF):
         self.font_wanchi = register_wanchi_font(self)
 
     def header_wanchi(self):
-        # 1. Chèn Logo
         if available_logo:
             self.image(available_logo, x=10, y=8, h=15)
         else:
             self.set_font(self.font_wanchi, "B", 18)
             self.cell(100, 10, "WANCHI", border=0, align='L')
         
-        # 2. Thông tin bên phải
         self.set_font(self.font_wanchi, "B", 10)
         self.set_xy(130, 8)
         self.multi_cell(70, 5, txt=f"BẢNG BÁO GIÁ {self.quote_type}\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
@@ -118,18 +115,22 @@ def export_pro_pdf(df, mode="AGENCY"):
     pdf.add_page()
     pdf.header_wanchi()
     
-    # Header Bảng
     pdf.set_fill_color(230, 230, 230)
     pdf.set_font(pdf.font_wanchi, "B", 10)
     
-    widths = [40, 30, 50, 35, 20, 15]
-    headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
+    # Thiết lập cột tùy theo loại báo giá (Tổng độ rộng = 190)
+    if mode == "COMPANY":
+        widths = [40, 30, 50, 35, 20, 15]
+        headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
+    else:
+        # Đại lý không có cột Hình ảnh, các cột khác được mở rộng ra
+        widths = [40, 65, 45, 20, 20]
+        headers = ["Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Lốc"]
     
     for i, head in enumerate(headers):
         pdf.cell(widths[i], 12, txt=head, border=1, fill=True, align='C')
     pdf.ln()
     
-    # Nội dung Bảng
     pdf.set_font(pdf.font_wanchi, "", 9)
     row_h = 35 
     
@@ -144,52 +145,60 @@ def export_pro_pdf(df, mode="AGENCY"):
             pdf.set_font(pdf.font_wanchi, "", 9)
 
         x, y = pdf.get_x(), pdf.get_y()
+        curr_x = x
 
-        # 1. Hình ảnh
-        pdf.rect(x, y, widths[0], row_h)
-        img_url = row.get('image_data', '') if mode == "COMPANY" else ""
-        if img_url:
-            try:
-                res = requests.get(img_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-                if res.status_code == 200:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                        tmp.write(res.content)
-                        pdf.image(tmp.name, x=x+2, y=y+2, w=widths[0]-4, h=row_h-4)
-                    os.remove(tmp.name)
-            except: pass
+        # 1. Hình ảnh (Chỉ dành cho CÔNG TY)
+        if mode == "COMPANY":
+            pdf.rect(curr_x, y, widths[0], row_h)
+            img_url = row.get('image_data', '')
+            if img_url:
+                try:
+                    res = requests.get(img_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+                    if res.status_code == 200 and 'image' in res.headers.get('Content-Type', ''):
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                            tmp.write(res.content)
+                            tmp_path = tmp.name
+                        pdf.image(tmp_path, x=curr_x+2, y=y+2, w=widths[0]-4, h=row_h-4)
+                        os.remove(tmp_path)
+                except: pass
+            curr_x += widths[0]
+            
+            w_ma, w_dg, w_kt, w_gia, w_loc = widths[1], widths[2], widths[3], widths[4], widths[5]
+        else:
+            w_ma, w_dg, w_kt, w_gia, w_loc = widths[0], widths[1], widths[2], widths[3], widths[4]
 
         # 2. Mã SP
-        pdf.set_xy(x + widths[0], y)
-        pdf.rect(x + widths[0], y, widths[1], row_h)
-        pdf.set_xy(x + widths[0], y + 15)
-        pdf.multi_cell(widths[1], 5, txt=str(row.get('product_code', '')), border=0, align='C')
+        pdf.rect(curr_x, y, w_ma, row_h)
+        pdf.set_xy(curr_x, y + 15)
+        pdf.multi_cell(w_ma, 5, txt=str(row.get('product_code', '')), border=0, align='C')
+        curr_x += w_ma
 
         # 3. Diễn giải
-        curr_x = x + widths[0] + widths[1]
-        pdf.rect(curr_x, y, widths[2], row_h)
+        pdf.rect(curr_x, y, w_dg, row_h)
         pdf.set_xy(curr_x + 2, y + 10)
-        pdf.multi_cell(widths[2]-4, 5, txt=str(row.get('name', '')), border=0, align='C')
+        pdf.multi_cell(w_dg-4, 5, txt=str(row.get('name', '')), border=0, align='C')
+        curr_x += w_dg
 
         # 4. Kích thước
-        curr_x += widths[2]
-        pdf.rect(curr_x, y, widths[3], row_h)
+        pdf.rect(curr_x, y, w_kt, row_h)
         pdf.set_xy(curr_x + 2, y + 12)
-        pdf.multi_cell(widths[3]-4, 5, txt=str(row.get('size', '')), border=0, align='C')
+        size_clean = str(row.get('size', '')).strip()
+        pdf.multi_cell(w_kt-4, 5, txt=size_clean, border=0, align='C')
+        curr_x += w_kt
 
         # 5. Đơn giá
-        curr_x += widths[3]
-        pdf.rect(curr_x, y, widths[4], row_h)
+        pdf.rect(curr_x, y, w_gia, row_h)
         pdf.set_xy(curr_x, y + 15)
         price_val = row.get('price_agency' if mode == "AGENCY" else 'price_company', 0)
         price_str = f"{int(price_val):,}".replace(",", ".")
-        pdf.cell(widths[4], 5, txt=price_str, border=0, align='C')
+        pdf.cell(w_gia, 5, txt=price_str, border=0, align='C')
+        curr_x += w_gia
 
         # 6. Lốc
-        curr_x += widths[4]
-        pdf.rect(curr_x, y, widths[5], row_h)
+        pdf.rect(curr_x, y, w_loc, row_h)
         pdf.set_xy(curr_x, y + 15)
         unit = f"{row['unit_per_pack']} cái" if mode == "AGENCY" else "1 cái"
-        pdf.cell(widths[5], 5, txt=unit, border=0, align='C')
+        pdf.cell(w_loc, 5, txt=unit, border=0, align='C')
 
         pdf.set_xy(x, y + row_h)
 
@@ -221,11 +230,13 @@ else:
             price = c2.number_input("Giá gốc Đại lý", min_value=0)
             pack = st.number_input("Quy cách Lốc", value=100)
             if st.form_submit_button("Lưu kho Đại lý"):
-                with conn.session as s:
-                    s.execute(text("INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) VALUES (:c, :n, :s, :p, :pk) ON CONFLICT (product_code) DO UPDATE SET name=:n, size=:s, price_agency=:p, unit_per_pack=:pk"), 
-                              {"c":str(code), "n":str(name), "s":str(size), "p":float(price), "pk":int(pack)})
-                    s.commit()
-                st.success("Đã lưu!")
+                try:
+                    with conn.session as s:
+                        s.execute(text("INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) VALUES (:c, :n, :s, :p, :pk) ON CONFLICT (product_code) DO UPDATE SET name=:n, size=:s, price_agency=:p, unit_per_pack=:pk"), 
+                                  {"c":str(code), "n":str(name), "s":str(size), "p":float(price), "pk":int(pack)})
+                        s.commit()
+                    st.success("Đã lưu!")
+                except: pass
         
         st.divider()
         st.subheader("Bảng giá Đại lý (Nội bộ)")
