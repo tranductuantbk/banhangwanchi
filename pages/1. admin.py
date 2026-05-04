@@ -209,11 +209,19 @@ else:
     with tab2:
         df_a2 = conn.query("SELECT * FROM agency_products", ttl=0)
         if not df_a2.empty:
-            sel = st.selectbox("Chọn sản phẩm:", df_a2['product_code'])
+            # SỬA ĐỔI: Tạo bộ từ điển ánh xạ từ Mã SP sang Tên diễn giải
+            name_mapping = dict(zip(df_a2['product_code'], df_a2['name']))
+            
+            # SỬA ĐỔI: Sử dụng format_func để chỉ hiển thị Tên diễn giải
+            sel = st.selectbox(
+                "Chọn sản phẩm:", 
+                options=df_a2['product_code'],
+                format_func=lambda x: name_mapping.get(x, x)
+            )
+            
             target = df_a2[df_a2['product_code'] == sel].iloc[0]
             
             with st.form("co_form"):
-                # 2 & 3. Xóa tính giá tự động, thêm ô cho phép tự nhập giá Công ty (Gợi ý sẵn bằng giá Đại lý để dễ thao tác)
                 price_company = st.number_input("Nhập giá Công ty (VNĐ)", min_value=0, value=int(target.get('price_agency', 0)))
                 
                 raw_img = st.text_input("Link ảnh thiết kế (Chú ý: Nhớ bật quyền 'Bất kỳ ai có liên kết' trên Drive):")
