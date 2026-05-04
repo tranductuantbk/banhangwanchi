@@ -172,7 +172,8 @@ if not st.session_state.is_admin:
             st.session_state.is_admin = True
             st.rerun()
 else:
-    tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập SP Đại lý", "🏢 Lên đời SP Công ty", "📈 Danh sách SP Công ty", "📜 Đơn hàng"])
+    # 1. Đổi tên tab 2 thành "Nhập giá SP Công ty"
+    tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập SP Đại lý", "🏢 Nhập giá SP Công ty", "📈 Danh sách SP Công ty", "📜 Đơn hàng"])
     
     with tab1:
         with st.form("agency_add"):
@@ -210,15 +211,16 @@ else:
         if not df_a2.empty:
             sel = st.selectbox("Chọn sản phẩm:", df_a2['product_code'])
             target = df_a2[df_a2['product_code'] == sel].iloc[0]
-            price_co = round(float(target['price_agency']) / 0.55, 0)
+            
             with st.form("co_form"):
-                st.write(f"Giá Công ty tự động: **{int(price_co):,} đ**")
-                # Thêm lời nhắc nhở quyền Share cho Link Drive
+                # 2 & 3. Xóa tính giá tự động, thêm ô cho phép tự nhập giá Công ty (Gợi ý sẵn bằng giá Đại lý để dễ thao tác)
+                price_company = st.number_input("Nhập giá Công ty (VNĐ)", min_value=0, value=int(target.get('price_agency', 0)))
+                
                 raw_img = st.text_input("Link ảnh thiết kế (Chú ý: Nhớ bật quyền 'Bất kỳ ai có liên kết' trên Drive):")
                 if st.form_submit_button("Xác nhận"):
                     final_i = convert_drive_link(raw_img)
                     with conn.session as s:
-                        s.execute(text("INSERT INTO company_products (product_code, name, size, price_company, image_data) VALUES (:c, :n, :s, :p, :i) ON CONFLICT (product_code) DO UPDATE SET price_company=:p, image_data=:i"), {"c":target['product_code'], "n":target['name'], "s":target['size'], "p":price_co, "i":str(final_i)})
+                        s.execute(text("INSERT INTO company_products (product_code, name, size, price_company, image_data) VALUES (:c, :n, :s, :p, :i) ON CONFLICT (product_code) DO UPDATE SET price_company=:p, image_data=:i"), {"c":target['product_code'], "n":target['name'], "s":target['size'], "p":price_company, "i":str(final_i)})
                         s.commit()
                     st.success("Đã cập nhật kho Công ty!")
 
