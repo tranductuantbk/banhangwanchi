@@ -20,12 +20,14 @@ try:
         s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         
-        # Gỡ bỏ ràng buộc Unique cũ của product_code (Mã SP được phép trùng)
+        # Gỡ bỏ triệt để các ràng buộc Unique cũ của product_code gây lỗi
         s.execute(text("ALTER TABLE agency_products DROP CONSTRAINT IF EXISTS agency_products_product_code_key CASCADE;"))
+        s.execute(text("ALTER TABLE agency_products DROP CONSTRAINT IF EXISTS agency_products_product_code_key1 CASCADE;"))
         s.execute(text("ALTER TABLE company_products DROP CONSTRAINT IF EXISTS company_products_product_code_key CASCADE;"))
+        s.execute(text("ALTER TABLE company_products DROP CONSTRAINT IF EXISTS company_products_product_code_key1 CASCADE;"))
         s.commit()
 except Exception as e:
-    pass # Bỏ qua lỗi nhẹ nếu các khóa này đã được xóa từ trước
+    pass # Bỏ qua nếu các khóa này đã được xóa
 
 # --- KIỂM TRA TÀI NGUYÊN ---
 available_font = None
