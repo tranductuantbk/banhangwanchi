@@ -1,40 +1,42 @@
 import streamlit as st
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from fpdf import FPDF
 import re
 import requests
 import tempfile
 import os
 from datetime import datetime
-import uuid
 
 st.set_page_config(page_title="WANCHI Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 # ==========================================
-# KHỐI "VE SẦU THOÁT XÁC" - BYPASS DATABASE LOCK
+# KHỐI TỰ ĐỘNG DỌN DẸP RÀNG BUỘC DATABASE
+# Tự động tìm và xóa sạch mọi giới hạn Unique trên cột product_code
 # ==========================================
 try:
     with conn.session as s:
-        # 1. Tạo cột mới hoàn toàn để lưu Mã SP thật (không bị dính khóa Unique)
-        s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS code_sp VARCHAR(255);"))
-        s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS code_sp VARCHAR(255);"))
-        
-        # 2. Tạo các cột phụ trợ
         s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
-        
-        # 3. Chép toàn bộ Mã SP cũ sang cột mới (Chỉ chạy 1 lần cho dữ liệu cũ)
-        s.execute(text("UPDATE agency_products SET code_sp = product_code WHERE code_sp IS NULL;"))
-        s.execute(text("UPDATE company_products SET code_sp = product_code WHERE code_sp IS NULL;"))
+        s.commit()
+
+    insp = inspect(conn.engine)
+    with conn.session as s:
+        for table in ['agency_products', 'company_products']:
+            if table in insp.get_table_names():
+                # 1. Quét và xóa các Constraint (Ràng buộc) của product_code
+                for uq in insp.get_unique_constraints(table):
+                    if 'product_code' in uq['column_names']:
+                        s.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {uq['name']} CASCADE;"))
+                
+                # 2. Quét và xóa các Index (Chỉ mục ẩn) của product_code
+                for ix in insp.get_indexes(table):
+                    if 'product_code' in ix['column_names'] and ix['unique']:
+                        s.execute(text(f"DROP INDEX IF EXISTS {ix['name']} CASCADE;"))
         s.commit()
 except Exception as e:
     pass
-
-def get_fake_code():
-    # Hàm tạo mã giả để đánh lừa cột product_code cũ
-    return f"PASS_{uuid.uuid4().hex[:8]}"
 
 # --- KIỂM TRA TÀI NGUYÊN ---
 available_font = None
@@ -84,7 +86,7 @@ class WanchiPDF(FPDF):
         self.multi_cell(70, 5, txt=f"BẢNG BÁO GIÁ {self.quote_type}\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
         self.ln(10)
 
-# --- THIẾT KẾ GRID TẠO BẢNG CHUYÊN NGHIỆP ---
+# --- THIẾT KẾ GRID ---
 def export_pro_pdf(df, mode="AGENCY"):
     title = "ĐẠI LÝ" if mode == "AGENCY" else "CÔNG TY"
     pdf = WanchiPDF(quote_type=title)
@@ -182,7 +184,7 @@ else:
     with tab1:
         with st.form("agency_add"):
             c1, c2 = st.columns(2)
-            code = c1.text_input("Mã sản phẩm (Thoải mái nhập trùng)")
+            code = c1.text_input("Mã sản phẩm (Được phép trùng)")
             name = c2.text_input("Tên diễn giải (Bắt buộc KHÔNG trùng)")
             size, price = c1.text_input("Kích thước"), c2.number_input("Giá gốc Đại lý", min_value=0)
             pack = st.number_input("Quy cách Lốc", value=100)
@@ -193,31 +195,31 @@ else:
                 else:
                     try:
                         with conn.session as s:
+                            # Kiểm tra xem Tên diễn giải đã có chưa
                             check_query = text("SELECT id FROM agency_products WHERE name = :n")
                             exists = s.execute(check_query, {"n": name}).fetchone()
                             
                             if exists:
-                                # Nếu Tên diễn giải đã có -> Chế độ CẬP NHẬT (Kể cả đổi Mã SP)
+                                # Nếu Tên đã tồn tại -> CẬP NHẬT đè lên dòng đó
                                 s.execute(text("""
                                     UPDATE agency_products 
-                                    SET price_agency=:p, code_sp=:c, size=:s, unit_per_pack=:pk 
+                                    SET product_code=:c, size=:s, price_agency=:p, unit_per_pack=:pk 
                                     WHERE name=:n
                                 """), {"c":code, "n":name, "s":size, "p":price, "pk":pack})
+                                st.success(f"Đã cập nhật đè lên Tên diễn giải: {name}!")
                             else:
-                                # Nếu Tên diễn giải chưa có -> THÊM MỚI (Dùng Bypass mã giả)
-                                fake_code = get_fake_code()
+                                # Nếu Tên chưa tồn tại -> THÊM MỚI
                                 s.execute(text("""
-                                    INSERT INTO agency_products (product_code, code_sp, name, size, price_agency, unit_per_pack) 
-                                    VALUES (:fake, :c, :n, :s, :p, :pk)
-                                """), {"fake":fake_code, "c":code, "n":name, "s":size, "p":price, "pk":pack})
+                                    INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) 
+                                    VALUES (:c, :n, :s, :p, :pk)
+                                """), {"c":code, "n":name, "s":size, "p":price, "pk":pack})
+                                st.success(f"Đã thêm mới diễn giải: {name}!")
                             s.commit()
-                        st.success(f"Đã lưu thành công diễn giải: {name}!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Lỗi Data: {e}")
         
-        # Đổi tên cột code_sp thành product_code lúc truy xuất để giao diện tự khớp
-        df_a = conn.query("SELECT id, code_sp AS product_code, name, size, price_agency, unit_per_pack FROM agency_products ORDER BY id DESC", ttl=0)
+        df_a = conn.query("SELECT * FROM agency_products ORDER BY id DESC", ttl=0)
         if not df_a.empty:
             st.dataframe(df_a[['product_code', 'name', 'size', 'price_agency', 'unit_per_pack']], use_container_width=True)
             if st.button("🚀 XUẤT PDF ĐẠI LÝ"):
@@ -237,7 +239,7 @@ else:
                     st.rerun()
 
     with tab2:
-        df_a2 = conn.query("SELECT code_sp AS product_code, name, size, price_agency FROM agency_products", ttl=0)
+        df_a2 = conn.query("SELECT * FROM agency_products", ttl=0)
         if not df_a2.empty:
             sel = st.selectbox("Chọn sản phẩm cần nhập giá công ty:", options=df_a2['name'])
             target = df_a2[df_a2['name'] == sel].iloc[0]
@@ -255,24 +257,25 @@ else:
                             exists = s.execute(check_query, {"n": target['name']}).fetchone()
                             
                             if exists:
+                                # Cập nhật
                                 s.execute(text("""
                                     UPDATE company_products 
-                                    SET price_company=:p, code_sp=:c, image_data=:i 
+                                    SET price_company=:p, product_code=:c, image_data=:i 
                                     WHERE name=:n
                                 """), {"c":target['product_code'], "n":target['name'], "s":target['size'], "p":price_company, "i":str(final_i)})
                             else:
-                                fake_code = get_fake_code()
+                                # Thêm mới
                                 s.execute(text("""
-                                    INSERT INTO company_products (product_code, code_sp, name, size, price_company, image_data) 
-                                    VALUES (:fake, :c, :n, :s, :p, :i)
-                                """), {"fake":fake_code, "c":target['product_code'], "n":target['name'], "s":target['size'], "p":price_company, "i":str(final_i)})
+                                    INSERT INTO company_products (product_code, name, size, price_company, image_data) 
+                                    VALUES (:c, :n, :s, :p, :i)
+                                """), {"c":target['product_code'], "n":target['name'], "s":target['size'], "p":price_company, "i":str(final_i)})
                             s.commit()
                         st.success("Đã cập nhật kho Công ty!")
                     except Exception as e:
                         st.error(f"❌ Lỗi Data: {e}")
 
     with tab3:
-        df_c = conn.query("SELECT id, code_sp AS product_code, name, size, price_company, image_data FROM company_products ORDER BY id DESC", ttl=0)
+        df_c = conn.query("SELECT * FROM company_products ORDER BY id DESC", ttl=0)
         if not df_c.empty:
             st.dataframe(df_c[['product_code', 'name', 'size', 'price_company']], use_container_width=True)
             if st.button("🚀 XUẤT PDF CÔNG TY"):
