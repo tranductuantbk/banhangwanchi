@@ -8,18 +8,29 @@ import tempfile
 import os
 from datetime import datetime
 
-st.set_page_config(page_title="Wanchi Admin - Quản lý Kho", layout="wide")
+st.set_page_config(page_title="WANCHI Admin - Quản lý Kho", layout="wide")
 conn = st.connection("postgresql", type="sql", pool_pre_ping=True)
 
 # ==========================================
-# KHỐI TỰ ĐỘNG SỬA LỖI DATABASE
+# KHỐI TỰ ĐỘNG SỬA LỖI & THAY ĐỔI CẤU TRÚC DATABASE
 # ==========================================
 try:
     with conn.session as s:
+        # Thêm cột unit_per_pack nếu chưa có
         s.execute(text("ALTER TABLE agency_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
         s.execute(text("ALTER TABLE company_products ADD COLUMN IF NOT EXISTS unit_per_pack INTEGER DEFAULT 100;"))
+        
+        # Gỡ bỏ ràng buộc Unique cũ của product_code (Mã SP được phép trùng)
+        s.execute(text("ALTER TABLE agency_products DROP CONSTRAINT IF EXISTS agency_products_product_code_key;"))
+        s.execute(text("ALTER TABLE company_products DROP CONSTRAINT IF EXISTS company_products_product_code_key;"))
+        
+        # Thêm ràng buộc Unique mới cho name (Tên diễn giải KHÔNG được phép trùng)
+        s.execute(text("ALTER TABLE agency_products ADD CONSTRAINT agency_products_name_key UNIQUE (name);"))
+        s.execute(text("ALTER TABLE company_products ADD CONSTRAINT company_products_name_key UNIQUE (name);"))
+        
         s.commit()
-except: pass
+except Exception as e:
+    pass
 
 # --- KIỂM TRA TÀI NGUYÊN ---
 available_font = None
@@ -41,7 +52,6 @@ available_logo = next((l for l in LOGO_FILES if os.path.exists(l)), None)
 # --- HÀM HỖ TRỢ ---
 def convert_drive_link(raw_url):
     if not raw_url: return ""
-    # Dùng API tải file trực tiếp (ổn định nhất để lấy ảnh Drive)
     match = re.search(r"(?:/d/|id=)([a-zA-Z0-9_-]+)", str(raw_url))
     return f"https://drive.google.com/uc?export=download&id={match.group(1)}" if match else raw_url
 
@@ -70,7 +80,7 @@ class WanchiPDF(FPDF):
         self.multi_cell(70, 5, txt=f"BẢNG BÁO GIÁ {self.quote_type}\nTháng {datetime.now().strftime('%m/%Y')}\nHotline: 0902.580.828", align='R')
         self.ln(10)
 
-# --- THIẾT KẾ GRID MỚI TẠO ĐƯỜNG VIỀN KÍN MẠCH ---
+# --- THIẾT KẾ GRID ---
 def export_pro_pdf(df, mode="AGENCY"):
     title = "ĐẠI LÝ" if mode == "AGENCY" else "CÔNG TY"
     pdf = WanchiPDF(quote_type=title)
@@ -82,13 +92,12 @@ def export_pro_pdf(df, mode="AGENCY"):
     if mode == "COMPANY":
         widths = [35, 30, 55, 35, 20, 15]
         headers = ["Hình ảnh", "Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"]
-        row_h = 26 # Chiều cao 26 rất gọn và vừa vặn cho ảnh
+        row_h = 26
     else:
         widths = [35, 70, 45, 20, 20]
         headers = ["Mã SP", "Diễn giải", "Kích thước", "Đơn giá", "Cái"]
         row_h = 12
     
-    # In Header Table
     for i, head in enumerate(headers):
         pdf.cell(widths[i], 10, txt=head, border=1, fill=True, align='C')
     pdf.ln()
@@ -106,20 +115,17 @@ def export_pro_pdf(df, mode="AGENCY"):
 
         x, y = pdf.get_x(), pdf.get_y()
         
-        # 1. BƯỚC QUAN TRỌNG: VẼ TOÀN BỘ KHUNG VIỀN ĐỨT ĐOẠN TRƯỚC ĐỂ LUÔN SẮC NÉT
         cx = x
         for w in widths:
             pdf.rect(cx, y, w, row_h)
             cx += w
             
-        # 2. ĐIỀN NỘI DUNG VÀO Ô
         cx = x
         if mode == "COMPANY":
             img_url = row.get('image_data', '')
             if img_url:
                 try:
                     res = requests.get(img_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7)
-                    # Bỏ qua nếu là file HTML (Google bắt đăng nhập)
                     if res.status_code == 200 and 'text/html' not in res.headers.get('Content-Type', ''):
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                             tmp.write(res.content)
@@ -131,29 +137,24 @@ def export_pro_pdf(df, mode="AGENCY"):
             w_list = widths[1:]
         else: w_list = widths
 
-        # Cột 1: Mã SP (Căn giữa)
         pdf.set_xy(cx, y + (row_h/2 - 2.5))
         pdf.multi_cell(w_list[0], 5, txt=str(row.get('product_code', '')), border=0, align='C')
         cx += w_list[0]
 
-        # Cột 2: Diễn giải (Sát viền trên để tự rớt dòng đẹp)
         pdf.set_xy(cx + 1, y + 2)
         pdf.multi_cell(w_list[1] - 2, 5, txt=str(row.get('name', '')), border=0, align='C')
         cx += w_list[1]
 
-        # Cột 3: Kích thước
         pdf.set_xy(cx + 1, y + 2)
         pdf.multi_cell(w_list[2] - 2, 5, txt=str(row.get('size', '')), border=0, align='C')
         cx += w_list[2]
 
-        # Cột 4: Đơn giá (Căn giữa dọc)
         price_val = row.get('price_company') if mode == "COMPANY" else row.get('price_agency')
         price_str = f"{int(price_val):,}".replace(",", ".") if pd.notna(price_val) else "0"
         pdf.set_xy(cx, y + (row_h/2 - 2.5))
         pdf.cell(w_list[3], 5, txt=price_str, border=0, align='C')
         cx += w_list[3]
 
-        # Cột 5: CÁI
         unit_str = "1 cái" if mode == "COMPANY" else f"{row.get('unit_per_pack', 100)} cái"
         pdf.set_xy(cx, y + (row_h/2 - 2.5))
         pdf.cell(w_list[4], 5, txt=unit_str, border=0, align='C')
@@ -172,20 +173,30 @@ if not st.session_state.is_admin:
             st.session_state.is_admin = True
             st.rerun()
 else:
-    # 1. Đổi tên tab 2 thành "Nhập giá SP Công ty"
     tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập SP Đại lý", "🏢 Nhập giá SP Công ty", "📈 Danh sách SP Công ty", "📜 Đơn hàng"])
     
     with tab1:
         with st.form("agency_add"):
             c1, c2 = st.columns(2)
-            code, name = c1.text_input("Mã sản phẩm"), c2.text_input("Tên diễn giải")
+            code = c1.text_input("Mã sản phẩm (Có thể trùng)")
+            name = c2.text_input("Tên diễn giải (Bắt buộc KHÔNG trùng)")
             size, price = c1.text_input("Kích thước"), c2.number_input("Giá gốc Đại lý", min_value=0)
             pack = st.number_input("Quy cách Lốc", value=100)
+            
             if st.form_submit_button("Lưu kho Đại lý"):
-                with conn.session as s:
-                    s.execute(text("INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) VALUES (:c, :n, :s, :p, :pk) ON CONFLICT (product_code) DO UPDATE SET price_agency=:p, name=:n, size=:s, unit_per_pack=:pk"), {"c":code, "n":name, "s":size, "p":price, "pk":pack})
-                    s.commit()
-                st.success("Đã lưu!")
+                if not name.strip():
+                    st.error("Tên diễn giải không được để trống!")
+                else:
+                    with conn.session as s:
+                        # Thay đổi: Xử lý conflict dựa trên cột name thay vì product_code
+                        s.execute(text("""
+                            INSERT INTO agency_products (product_code, name, size, price_agency, unit_per_pack) 
+                            VALUES (:c, :n, :s, :p, :pk) 
+                            ON CONFLICT (name) 
+                            DO UPDATE SET price_agency=:p, product_code=:c, size=:s, unit_per_pack=:pk
+                        """), {"c":code, "n":name, "s":size, "p":price, "pk":pack})
+                        s.commit()
+                    st.success("Đã lưu!")
         
         df_a = conn.query("SELECT * FROM agency_products ORDER BY id DESC", ttl=0)
         if not df_a.empty:
@@ -196,39 +207,40 @@ else:
             
             st.divider()
             st.subheader("🗑️ Xóa sản phẩm Đại lý")
-            del_opts_a = {row['product_code']: f"[{row['product_code']}] {row['name']}" for _, row in df_a.iterrows()}
-            sel_del_a = st.selectbox("Chọn mã SP Đại lý cần xóa:", options=list(del_opts_a.keys()), format_func=lambda x: del_opts_a[x])
+            # Thay đổi: Dùng name làm key thay vì product_code
+            del_opts_a = {row['name']: f"[{row['product_code']}] {row['name']}" for _, row in df_a.iterrows()}
+            sel_del_a = st.selectbox("Chọn Diễn giải SP Đại lý cần xóa:", options=list(del_opts_a.keys()), format_func=lambda x: del_opts_a[x])
             with st.popover("🗑️ Xác nhận xóa Đại lý"):
-                st.warning(f"Xóa vĩnh viễn mã {sel_del_a}?")
+                st.warning(f"Xóa vĩnh viễn sản phẩm: {sel_del_a}?")
                 if st.button("Xác nhận xóa ngay", key="btn_del_a"):
                     with conn.session as s:
-                        s.execute(text("DELETE FROM agency_products WHERE product_code=:c"), {"c": sel_del_a})
+                        # Thay đổi: Xóa dựa trên name
+                        s.execute(text("DELETE FROM agency_products WHERE name=:n"), {"n": sel_del_a})
                         s.commit()
                     st.rerun()
 
     with tab2:
         df_a2 = conn.query("SELECT * FROM agency_products", ttl=0)
         if not df_a2.empty:
-            # SỬA ĐỔI: Tạo bộ từ điển ánh xạ từ Mã SP sang Tên diễn giải
-            name_mapping = dict(zip(df_a2['product_code'], df_a2['name']))
-            
-            # SỬA ĐỔI: Sử dụng format_func để chỉ hiển thị Tên diễn giải
-            sel = st.selectbox(
-                "Chọn sản phẩm:", 
-                options=df_a2['product_code'],
-                format_func=lambda x: name_mapping.get(x, x)
-            )
-            
-            target = df_a2[df_a2['product_code'] == sel].iloc[0]
+            # Thay đổi: Chọn trực tiếp bằng cột name vì name giờ là duy nhất
+            sel = st.selectbox("Chọn sản phẩm cần nhập giá công ty:", options=df_a2['name'])
+            target = df_a2[df_a2['name'] == sel].iloc[0]
             
             with st.form("co_form"):
+                st.write(f"Đang cập nhật cho: **[{target['product_code']}] {target['name']}**")
                 price_company = st.number_input("Nhập giá Công ty (VNĐ)", min_value=0, value=int(target.get('price_agency', 0)))
                 
                 raw_img = st.text_input("Link ảnh thiết kế (Chú ý: Nhớ bật quyền 'Bất kỳ ai có liên kết' trên Drive):")
                 if st.form_submit_button("Xác nhận"):
                     final_i = convert_drive_link(raw_img)
                     with conn.session as s:
-                        s.execute(text("INSERT INTO company_products (product_code, name, size, price_company, image_data) VALUES (:c, :n, :s, :p, :i) ON CONFLICT (product_code) DO UPDATE SET price_company=:p, image_data=:i"), {"c":target['product_code'], "n":target['name'], "s":target['size'], "p":price_company, "i":str(final_i)})
+                        # Thay đổi: Xử lý conflict dựa trên name thay vì product_code
+                        s.execute(text("""
+                            INSERT INTO company_products (product_code, name, size, price_company, image_data) 
+                            VALUES (:c, :n, :s, :p, :i) 
+                            ON CONFLICT (name) 
+                            DO UPDATE SET price_company=:p, product_code=:c, image_data=:i
+                        """), {"c":target['product_code'], "n":target['name'], "s":target['size'], "p":price_company, "i":str(final_i)})
                         s.commit()
                     st.success("Đã cập nhật kho Công ty!")
 
@@ -243,13 +255,15 @@ else:
             
             st.divider()
             st.subheader("🗑️ Xóa sản phẩm Công ty")
-            del_opts_c = {row['product_code']: f"[{row['product_code']}] {row['name']}" for _, row in df_c.iterrows()}
-            sel_del_c = st.selectbox("Chọn mã SP Công ty cần xóa:", options=list(del_opts_c.keys()), format_func=lambda x: del_opts_c[x])
+            # Thay đổi: Dùng name làm key thay vì product_code
+            del_opts_c = {row['name']: f"[{row['product_code']}] {row['name']}" for _, row in df_c.iterrows()}
+            sel_del_c = st.selectbox("Chọn Diễn giải SP Công ty cần xóa:", options=list(del_opts_c.keys()), format_func=lambda x: del_opts_c[x])
             with st.popover("🗑️ Xác nhận xóa Công ty"):
-                st.warning(f"Xóa SP Công ty {sel_del_c}? (Bên Đại lý vẫn giữ nguyên)")
+                st.warning(f"Xóa SP Công ty: {sel_del_c}? (Bên Đại lý vẫn giữ nguyên)")
                 if st.button("Xác nhận xóa ngay", key="btn_del_c"):
                     with conn.session as s:
-                        s.execute(text("DELETE FROM company_products WHERE product_code=:c"), {"c": sel_del_c})
+                        # Thay đổi: Xóa dựa trên name
+                        s.execute(text("DELETE FROM company_products WHERE name=:n"), {"n": sel_del_c})
                         s.commit()
                     st.rerun()
 
